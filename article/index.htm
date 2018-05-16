@@ -1,0 +1,250 @@
+<html>
+
+<head>
+<meta http-equiv="Content-Language" content="en-us">
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+<title>Everything Threading</title>
+</head>
+
+<body>
+
+<p>Everything Threading</p>
+<p>Various approaches to threading and discussing of locks, semaphores, 
+concurrent collections, work queues, and thread joining</p>
+<h2>Introduction</h2>
+<p>I was recently asked to provide some training on how threads are used in C#.&nbsp; 
+What started off as simple (doesn't it always) turned into a detailed analysis 
+of different approaches to threading and various ancillary topics.&nbsp; While 
+this is all been discussed before, I'm not sure there exists a comprehensive 
+look at threading, which hopefully this article succinctly covers.</p>
+<h3>Coming Up With a Good Thread Example</h3>
+<p>The first problem of course is coming up with a good example where the work 
+is capable of being broken up into isolated chunks and that takes a reasonable 
+amount of computational time so you can really see the difference in approaches.&nbsp; 
+I chose a brute force &quot;is the number prime&quot; algorithm.&nbsp; And I truly mean 
+brute force:</p>
+<pre>static bool IsPrime(int n)
+{
+  bool ret = true;
+  for (int i = 2; i &lt;= n / 2 &amp;&amp; ret; ret = n % i++ != 0);
+  return ret;
+}</pre>
+<p>Yes, there actually is no content to the for loop -- it does end in a <code>;</code>.</p>
+<p>Obviously, you would NEVER write a prime number calculation this way (a much 
+better approach is the 
+<a href="https://en.wikipedia.org/wiki/Sieve_of_Eratosthenes">Sieve of 
+Eranthoses</a>, which I'll actually work with 
+later in this article) but this algorithm has the advantage of:</p>
+<ul>
+	<li>Being slow.</li>
+	<li>Returning a true/false for each number.</li>
+</ul>
+<p>This is an advantage when writing an article about the nuances of threads!</p>
+<h3>The Timing Algorithm</h3>
+<p>To time things, I wrote a simple &quot;time how long this function takes&quot;:</p>
+<pre>static void DurationOf(Func&lt;int&gt; action, string section)
+{
+  var start = DateTime.Now;
+  int numPrimes = action();
+  var stop = DateTime.Now;
+
+  lock (locker)
+  {
+    Console.WriteLine(section);
+    Console.WriteLine(&quot;Number of primes is : &quot; + numPrimes);
+    Console.WriteLine(&quot;Total seconds = &quot; + (stop - start).TotalSeconds);
+  }
+}</pre>
+<p>It's rather tailored to the examples here in this article.</p>
+<h3>Locks</h3>
+<p>Let's talk about locks right now.&nbsp; Notice in the above code the <code>lock</code> 
+statement.&nbsp; The <code>lock</code> ensures that each <code>Console.WriteLine</code> is not 
+&quot;interrupted&quot; by another thread also writing to the console.&nbsp; A 
+lock statement requires an <code>object</code> that all threads can access which acts as the 
+synchronization object between threads.&nbsp; Typically, the synchronization 
+object is a root level <code>Object</code>:</p>
+<pre>static object locker = new object();</pre>
+<p>Locks can be dangerous:</p>
+<ul>
+	<li>If what you're performing in the lock takes a long time, your thread 
+	will lose performance as it waits for the lock to be released by another 
+	thread.</li>
+	<li>It's fairly easy to create a deadlock in which thread A is waiting for 
+	the lock to be released, and thread B, currently inside the lock, is waiting 
+	for thread A to finish some task.</li>
+</ul>
+<p>The body of a lock statement should never include anything that waits for a 
+thread to do some work.&nbsp; However, locks are useful when doing simple 
+synchronization, particularly of debug output or synchronizing access to a 
+physical &quot;thing&quot; like a hardware port.&nbsp; Otherwise, if there's a <code>lock</code> in 
+your code, it's probably a big red flag.</p>
+<h3>A Helper Method for the Brute Force Agorithm</h3>
+<p>This is called by several of the variations of brute force algorithm that are 
+to demonstrate threading, so it's useful to implement it once.</p>
+<pre>static int NumPrimes(int start, int end)
+{
+  int numPrimes = 0;
+  for (int i = start; i &lt; end; numPrimes += IsPrime(i++) ? 1 : 0);
+  return numPrimes;
+}</pre>
+<p>Yeah, another one of those do-nothing loops where the work is done in the 
+iterator portion of the for loop. </p>
+<h2>Brute Force Algorithm</h2>
+<p>Here we want to find how many primes there are between 2 and 500,000.&nbsp; I 
+chose 500,000 as the maximum as it takes about 35 seconds on my machine to 
+determine that there are 41,538 prime numbers.&nbsp; </p>
+<p>Calling the algorithm:</p>
+<pre>DurationOf(BruteForce, &quot;Brute force:&quot;);</pre>
+<p>The implementation:</p>
+<pre>static int BruteForce()
+{
+  int numPrimes = NumPrimes(2, MAX);
+
+  return numPrimes;
+}
+</pre>
+<p>The results:</p>
+<pre>Brute force:
+Number of primes is : 41538
+Total seconds = 30.1119874</pre>
+<h2>Threading The Brute Force Algorithm</h2>
+<p>Let's take a stab at optimizing this by breaking the work up into chunks and 
+giving each thread (up to the number of processors) the chunk to work on.&nbsp; 
+We'll evenly divide the chunks.&nbsp; The astute reader will realize that is not 
+optimal, but we'll illustrate why and discuss one of the important things about 
+multi-threading -- make sure your work load is evenly distributed!</p>
+<p>Keep in mind that what I'm about to show you is rather old school!</p>
+<p>Calling the algorithm:</p>
+<pre>DurationOf(ThreadedBruteForce, &quot;Threaded brute force:&quot;);</pre>
+<p>The implementation:</p>
+<p>First, setting up the threads:</p>
+<pre>static int ThreadedBruteForce()
+{
+  List&lt;(Thread thread, int threadNum, int start, int end)&gt; threads = new List&lt;(Thread thread, int threadNum, int start, int end)&gt;();
+
+  int numProcs = Environment.ProcessorCount;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    int start = Math.Max(1, i * (MAX / numProcs)) + 1;
+    int end = (i + 1) * (MAX / numProcs);
+    var thread = new Thread(new ParameterizedThreadStart(BruteForceThread));
+    thread.IsBackground = true;
+    threads.Add((thread, i, start, end));
+  }
+
+  totalNumPrimes = 0;
+  threads.ForEach(t =&gt; t.thread.Start((t.threadNum, t.start, t.end)));
+  threads.ForEach(t =&gt; t.thread.Join());
+
+  return totalNumPrimes;
+}</pre>
+<p>The worker thread:</p>
+<pre>static void BruteForceThread(object parms)
+{
+  (int threadNum, int start, int end) parm = (ValueTuple&lt;int, int, int&gt;)parms;
+  DurationOf(() =&gt;
+  {
+    int numPrimes = NumPrimes(parm.start, parm.end);
+    Interlocked.Add(ref totalNumPrimes, numPrimes);
+    return numPrimes;
+  }, $&quot;Thread {parm.threadNum} processing {parm.start} to {parm.end}&quot;);
+}</pre>
+<p>The results:</p>
+<pre>Thread 0 processing 2 to 125000
+Number of primes is : 11734
+Total seconds = 3.8519907
+Thread 1 processing 125001 to 250000
+Number of primes is : 10310
+Total seconds = 9.0879819
+Thread 2 processing 250001 to 375000
+Number of primes is : 9860
+Total seconds = 12.963975
+Thread 3 processing 375001 to 500000
+Number of primes is : 9634
+Total seconds = 16.4079704
+Threaded brute force:
+Number of primes is : 41538
+Total seconds = 16.4119713</pre>
+<p>OK, cool, we've taken a 35 second process and reduced it to 16 seconds.&nbsp; 
+But notice that the workload is not evenly distributed.&nbsp; The threads take 
+different times.&nbsp; The reason should be obvious -- the larger the number 
+we're trying to determine is prime or not, the more divisions need to be 
+executed.&nbsp; So for numbers at the lower range, the thread finishes faster:</p>
+<pre>Thread 0 processing 2 to 125000
+Number of primes is : 11734
+Total seconds = 3.8519907</pre>
+<p>vs:</p>
+<pre>Thread 3 processing 375001 to 500000
+Number of primes is : 9634
+Total seconds = 16.4079704</pre>
+<h3>Thread Joins</h3>
+<p>Notice once the threads have been started, there is this statement:</p>
+<pre>threads.ForEach(t =&gt; t.thread.Join());</pre>
+<p>Here the Join method suspends execution until the thread on which Join is 
+called has finished.&nbsp; Be aware:</p>
+<ul>
+	<li>This can cause the current thread to indefinitely suspend its operation.</li>
+	<li>You wouldn't do this on a UI thread as the UI will no longer respond to 
+	user actions.</li>
+</ul>
+<h3>Background Threads</h3>
+<p>Notice this statement:</p>
+<pre>thread.IsBackground = true;</pre>
+<p>Telling the thread that it is a background thread ensures that it is killed 
+when the application exits.&nbsp; If you have a thread that is not a background 
+thread and you close the application or it in some other way terminates, the 
+thread will continue to exist (and run) as a process.</p>
+<h3>Thread Parameters</h3>
+<p>Notice this statement:</p>
+<pre>var thread = new Thread(new ParameterizedThreadStart(BruteForceThread));</pre>
+<p>Here we are setting up the method that implements the thread to accept 
+parameters.&nbsp; The signature must be <code>[methodName](object parameters)</code>, 
+which requires that you cast the object to the same type being passed in when 
+the thread is started:</p>
+<p>Starting the thread (I'm using a value tuple as the parameter):</p>
+<pre>threads.ForEach(t =&gt; t.thread.Start((t.threadNum, t.start, t.end)));</pre>
+<p>Casting the object (a value tuple in this case) in the method implementing 
+the thread:</p>
+<pre>(int threadNum, int start, int end) parm = (ValueTuple&lt;int, int, int&gt;)parms;</pre>
+<h3>Avoiding Casting the Object Parameter With a Lambda Expression</h3>
+<p>You can avoid the cast using an lambda expression which provides closure for 
+the current parameter values, like this:</p>
+<pre>for (int i = 0; i &lt; numProcs; i++)
+{
+  int j = i;
+  int start = Math.Max(1, i * (MAX / numProcs)) + 1;
+  int end = (i + 1) * (MAX / numProcs);
+  var thread = new Thread(() =&gt; BruteForceThread(j, start, end));
+  thread.IsBackground = true;
+  threads.Add((thread, i, start, end));
+}</pre>
+<p>Notice&nbsp;<code>int j = i;</code> is required for the closure -- otherwise 
+the thread number (not to be confused with the thread ID) is always the number 
+of processors (4 in my examples, usually.)</p>
+<p>Also notice that this works but is not necessary:</p>
+<pre>var thread = new Thread(new ThreadStart(() =&gt; BruteForceThread(j, start, end)));</pre>
+<p>Why?&nbsp; Because <code>ThreadStart</code> is defined as a delegate: <code>public delegate void ThreadStart();</code>so a 
+lambda expression is perfectly valid.</p>
+<p>The method implementing the thread now can accept parameters in the method 
+signature, avoiding the cast:</p>
+<pre>static void BruteForceThread(int threadNum, int start, int end)</pre>
+<h2>Balancing the Brute Force Algorithm Threads</h2>
+<p>Notice that the worker threads are not very balanced -- the work load <i>
+looks</i> like it is evenly distributed because we're giving each thread 1/n 
+(where n is the number of processors) of the work, but due to the nature of the 
+work, CPU cores are not efficiently used -- the thread with the lowest number 
+range finishes much sooner than the thread with the highest number range.</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>Thread / Task Cancellation</p>
+<p>Thread Exceptions</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+
+</body>
+
+</html>
