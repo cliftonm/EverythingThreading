@@ -64,6 +64,10 @@ lock statement requires an <code>object</code> that all threads can access which
 synchronization object between threads.&nbsp; Typically, the synchronization 
 object is a root level <code>Object</code>:</p>
 <pre>static object locker = new object();</pre>
+<p align="f">Historically, the concept of a lock was called a &quot;critical 
+section&quot;, meaning that only one thread could enter the code at a time.&nbsp; 
+Native Windows programmers will be familiar with the CRITICAL_SECTION<sup>4</sup> 
+structure and related methods.</p>
 <p>Locks can be dangerous:</p>
 <ul>
 	<li>If what you're performing in the lock takes a long time, your thread 
@@ -78,7 +82,7 @@ thread to do some work.&nbsp; However, locks are useful when doing simple
 synchronization, particularly of debug output or synchronizing access to a 
 physical &quot;thing&quot; like a hardware port.&nbsp; Otherwise, if there's a <code>lock</code> in 
 your code, it's probably a big red flag.</p>
-<h3>A Helper Method for the Brute Force Agorithm</h3>
+<h3>A Helper Method for the Brute Force Algorithm</h3>
 <p>This is called by several of the variations of brute force algorithm that are 
 to demonstrate threading, so it's useful to implement it once.</p>
 <pre>static int NumPrimes(int start, int end)
@@ -366,23 +370,124 @@ thread yourself rather than letting the .NET framework manage the thread for
 you, particularly threads that interact with .NET's <code>ThreadPool</code> (more on that 
 later.)&nbsp; Here are the most common options:</p>
 <ul>
-	<li>Task.Run - forcing an asynchronous method</li>
 	<li>AsParallel - a LINQ extension on an Enumerable</li>
+	<li>Task.Run - forcing an asynchronous method</li>
 	<li>await - calling an asynchronous method with a continuation</li>
 	<li>QueueUserWorkItem&nbsp; - queues work</li>
 	<li>BackgroundWorker</li>
 </ul>
-<p>All of these approaches use the .NET's ThreadPool with the potential 
+<p>Most of these approaches use the .NET's <code>ThreadPool</code> with the potential 
 exception of the &quot;await&quot; syntax in which you have more control over how the task 
 is set up.&nbsp; Each also has its nuances regarding:</p>
 <ul>
 	<li>exception handling</li>
 	<li>cancellation tokens</li>
 	<li>progress reporting</li>
-	<li>use of ThreadPool</li>
+	<li>best practices with <code>ThreadPool</code></li>
 </ul>
 <p>One really needs to understand these nuances and how they affect performance 
 and error handling.</p>
+<h3>AsParallel</h3>
+<p><code>AsParallel</code> is one of several query extension methods in the Parallel LINQ (<a href="https://docs.microsoft.com/en-us/dotnet/standard/parallel-programming/introduction-to-plinq">PLINQ</a>) 
+library.&nbsp; I'm not going to get into the details of the various methods in 
+the <code>ParallelEnumerable</code> class, instead let's look at just <code>AsParallel</code>. </p>
+<p>Calling the algorithm:</p>
+<pre>DurationOf(AsParallelGetNextWorkItemBruteForce, &quot;AsParallel get next work item brute force:&quot;);</pre>
+<p>The implementation:</p>
+<pre>static int AsParallelGetNextWorkItemBruteForce()
+{
+  int totalNumPrimes = 0;
+
+  var nums = Enumerable.Range(2, MAX);
+  nums.AsParallel().ForAll(n =&gt;
+  {
+    if (IsPrime(n))
+    {
+      Interlocked.Increment(ref totalNumPrimes);
+    }
+  });
+
+  return totalNumPrimes;
+}</pre>
+<p>Note the code&nbsp;&nbsp; <code>nums.AsParallel().ForAll</code>, which 
+attempts, for each item in the enumerable, to execute in parallel the action 
+action declared in <code>ForAll.</code></p>
+<p>The results (don't compare this with the results above, currently I'm on a VM 
+that seems to run faster than my laptop natively):</p>
+<pre>AsParallel get next work item brute force:
+Number of primes is : 41538
+Total seconds = 11.7537395</pre>
+<p>Compare with the balanced brute force thread timing:</p>
+<pre>Thread: 1
+Number of primes is : 10326
+Total seconds = 11.7124344
+Thread: 2
+Number of primes is : 10517
+Total seconds = 11.7124344
+Thread: 0
+Number of primes is : 10502
+Total seconds = 11.7124344
+Thread: 3
+Number of primes is : 10193
+Total seconds = 11.7134212
+Threaded get next work item brute force:
+Number of primes is : 41538
+Total seconds = 11.7304613</pre>
+<p>So that's neat -- we timing is essentially identical.</p>
+<h3>Task.Run</h3>
+<p><code>Task.Run</code> is one of the ways to implement a task-based 
+asynchronous pattern<sup>3</sup> (TAP) quickly to create a worker thread.&nbsp; This is 
+an example of what is called a &quot;compute-bound&quot; task, meaning that the task is 
+performed by the CPU rather than the program waiting for a device (like a 
+fingerprint reader) or connection (to a database, for example) to return a 
+result.&nbsp; It's important to understand the difference between compute-bound io-bound tasks<sup>2</sup>, particularly with regards to threads managed by the 
+ThreadPool, which should not block for large periods of time</p>
+<p>Calling the algorithm:</p>
+<pre>DurationOf(TaskRunGetNextWorkItemBruteForce, &quot;Task.Run get next work item brute force:&quot;);</pre>
+<p>The implementation:</p>
+<pre>static int TaskRunGetNextWorkItemBruteForce()
+{
+  int numProcs = Environment.ProcessorCount;
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  List&lt;Task&gt; tasks = new List&lt;Task&gt;();
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var task = Task.Run(() =&gt; NextWorkItemBruteForceThread(i));
+    tasks.Add(task);
+  }
+
+  Task.WaitAll(tasks.ToArray());
+
+  return totalNumPrimes;
+}</pre>
+<p>Notice the <code>Task.WaitAll</code>, which is like&nbsp; thread <code>Join</code> -- the current 
+thread blocks until all tasks are complete.&nbsp; As with <code>Join</code>, use with 
+caution!&nbsp; Also notice that we can call the same method, <code>NextWorkItemBruteForceThread(i)</code>, that performs the 
+computation as we do in the balanced brute force thread setup routine.</p>
+<p>The results (again don't compare with the previous results, I'm running on a 
+different machine at the moment) - these compare quite well with <code>AsParallel</code> and 
+the balanced brute force algorithm.</p>
+<pre>Thread: 4
+Number of primes is : 10369
+Total seconds = 11.9374993
+Thread: 4
+Number of primes is : 10351
+Total seconds = 11.9374993
+Thread: 4
+Number of primes is : 10293
+Total seconds = 11.9374993
+Thread: 4
+Number of primes is : 10525
+Total seconds = 11.9374993
+Task.Run get next work item brute force:
+Number of primes is : 41538
+Total seconds = 11.953198</pre>
+<p>A different (I'm not going to argue better or worse) implementation exposes </p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
@@ -390,15 +495,32 @@ and error handling.</p>
 <p>Semaphores and queuing work</p>
 <p>Task.Run</p>
 <p>async tasks</p>
+<p>&quot;doing CPU work&quot;&nbsp; google it</p>
 <p>ThreadPool.QueueUserWorkItem / BackgroundWorker</p>
 <p>Working with the ThreadPool:
 <a href="https://docs.microsoft.com/en-us/dotnet/standard/threading/the-managed-thread-pool">
 https://docs.microsoft.com/en-us/dotnet/standard/threading/the-managed-thread-pool</a> </p>
+<p>Task Completion: https://stackoverflow.com/questions/16063520/how-do-you-create-an-asynchronous-method-in-c</p>
 <p>Thread / Task Cancellation</p>
 <p>Thread Exceptions</p>
+<p>Mutex, ManualResetEvent, AutoResetEvent</p>
+<p>&nbsp;</p>
 <p><sup>1</sup> -&nbsp; the Intel CPU LOCK instruction supports ADD, ADC, AND, 
 BTC, BTR, BTS, CMPXCHG, CMPXCH8B, DEC, INC, NEG, NOT, OR, SBB, SUB, XOR, XADD, 
 and XCHG</p>
+<p><sup>2</sup> - 
+<a href="https://stackoverflow.com/questions/868568/what-do-the-terms-cpu-bound-and-i-o-bound-mean">https://stackoverflow.com/questions/868568/what-do-the-terms-cpu-bound-and-i-o-bound-mean</a></p>
+<p><sup>3</sup> -
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/asynchronous-programming-patterns/implementing-the-task-based-asynchronous-pattern">
+https://docs.microsoft.com/en-us/dotnet/standard/asynchronous-programming-patterns/implementing-the-task-based-asynchronous-pattern</a> </p>
+<p><sup>4</sup> -
+<a href="https://msdn.microsoft.com/en-us/library/windows/desktop/ms686908(v=vs.85).aspx">
+https://msdn.microsoft.com/en-us/library/windows/desktop/ms686908(v=vs.85).aspx</a> </p>
+<p>&nbsp;</p>
+<p>Calling the algorithm:</p>
+<p>The implementation:</p>
+<p>The worker thread:</p>
+<p>The results:</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>

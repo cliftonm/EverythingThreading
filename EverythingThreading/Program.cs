@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Primes
 {
@@ -25,10 +26,13 @@ namespace Primes
             // DurationOf(ThreadedBruteForce, "Threaded brute force:");
             Console.WriteLine();
 
-            DurationOf(ThreadedGetNextWorkItemBruteForce, "Threaded get next work item brute force:");
+            // DurationOf(ThreadedGetNextWorkItemBruteForce, "Threaded get next work item brute force:");
             Console.WriteLine();
 
-            // DurationOf(AsParallelGetNextWorkItemBruteForce, "As parallel get next work item brute force:");
+            // DurationOf(AsParallelGetNextWorkItemBruteForce, "AsPrallel get next work item brute force:");
+            Console.WriteLine();
+
+            DurationOf(TaskRunGetNextWorkItemBruteForce, "Task.Run get next work item brute force:");
             Console.WriteLine();
 
             // DurationOf(ThreadedGetNextWorkItemSieve, "Threaded get next work item sieve:");
@@ -127,6 +131,24 @@ namespace Primes
                     Interlocked.Increment(ref totalNumPrimes);
                 }
             });
+
+            return totalNumPrimes;
+        }
+
+        static int TaskRunGetNextWorkItemBruteForce()
+        {
+            int numProcs = Environment.ProcessorCount;
+            totalNumPrimes = 0;
+            nextNumber = 1;
+            List<Task> tasks = new List<Task>();
+
+            for (int i = 0; i < numProcs; i++)
+            {
+                var task = Task.Run(() => NextWorkItemBruteForceThread(i));
+                tasks.Add(task);
+            }
+
+            Task.WaitAll(tasks.ToArray());
 
             return totalNumPrimes;
         }
