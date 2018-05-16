@@ -22,10 +22,10 @@ namespace Primes
             // DurationOf(BruteForce, "Brute force:");
             Console.WriteLine();
 
-            DurationOf(ThreadedBruteForce, "Threaded brute force:");
+            // DurationOf(ThreadedBruteForce, "Threaded brute force:");
             Console.WriteLine();
 
-            //DurationOf(ThreadedGetNextWorkItemBruteForce, "Threaded get next work item brute force:");
+            DurationOf(ThreadedGetNextWorkItemBruteForce, "Threaded get next work item brute force:");
             Console.WriteLine();
 
             // DurationOf(AsParallelGetNextWorkItemBruteForce, "As parallel get next work item brute force:");
@@ -81,8 +81,8 @@ namespace Primes
                 int start = Math.Max(1, i * (MAX / numProcs)) + 1;
                 int end = (i + 1) * (MAX / numProcs);
                 // var thread = new Thread(new ParameterizedThreadStart(BruteForceThread));
-                // var thread = new Thread(new ThreadStart(() => BruteForceThread(i, start, end)));
-                var thread = new Thread(new ThreadStart(() => BruteForceThread(j, start, end)));
+                var thread = new Thread(new ThreadStart(() => BruteForceThread(i, start, end)));
+                // var thread = new Thread(new ThreadStart(() => BruteForceThread(j, start, end)));
                 thread.IsBackground = true;
                 threads.Add((thread, i, start, end));
             }
@@ -210,6 +210,7 @@ namespace Primes
             {
                 int numPrimes = 0;
                 int n;
+
                 while ((n = Interlocked.Increment(ref nextNumber)) < MAX)
                 {
                     if (IsPrime(n))
@@ -217,6 +218,7 @@ namespace Primes
                         ++numPrimes;
                     }
                 }
+
                 Interlocked.Add(ref totalNumPrimes, numPrimes);
                 return numPrimes;
             }, $"Thread: {threadNum}");

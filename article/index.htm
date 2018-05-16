@@ -107,7 +107,7 @@ determine that there are 41,538 prime numbers.&nbsp; </p>
 <pre>Brute force:
 Number of primes is : 41538
 Total seconds = 30.1119874</pre>
-<h2>Threading The Brute Force Algorithm</h2>
+<h2>Threaded The Brute Force Algorithm</h2>
 <p>Let's take a stab at optimizing this by breaking the work up into chunks and 
 giving each thread (up to the number of processors) the chunk to work on.&nbsp; 
 We'll evenly divide the chunks.&nbsp; The astute reader will realize that is not 
@@ -229,17 +229,176 @@ lambda expression is perfectly valid.</p>
 <p>The method implementing the thread now can accept parameters in the method 
 signature, avoiding the cast:</p>
 <pre>static void BruteForceThread(int threadNum, int start, int end)</pre>
+<h3>Using the ThreadStart Delegate is Time Costly!</h3>
+<p>These two lines of code are NOT equivalent:</p>
+<pre>var thread = new Thread(() =&gt; BruteForceThread(j, start, end));</pre>
+<p>vs.</p>
+<pre>var thread = new Thread(new ThreadStart(() =&gt; BruteForceThread(j, start, end)));</pre>
+<p>Notice the timing difference in the second version:</p>
+<pre>Thread 0 processing 2 to 125000
+Number of primes is : 11734
+Total seconds = 4.3607559
+Thread 1 processing 125001 to 250000
+Number of primes is : 10310
+Total seconds = 10.5416041
+Thread 2 processing 250001 to 375000
+Number of primes is : 9860
+Total seconds = 14.9788427
+Thread 3 processing 375001 to 500000
+Number of primes is : 9634
+Total seconds = 19.2458287
+Threaded brute force:
+Number of primes is : 41538
+Total seconds = 19.2458287</pre>
+<p>Roughly: </p>
+<ul>
+	<li>thread 0 take .5 seconds longer</li>
+	<li>thread 1 and 2 take 1.5 seconds longer</li>
+	<li>thread 3 takes almost 3 seconds longer</li>
+</ul>
+<p>This isn't just an anomaly, this is a consistent repeatable difference.&nbsp; 
+I have not found any discussion of why this is the case.</p>
 <h2>Balancing the Brute Force Algorithm Threads</h2>
 <p>Notice that the worker threads are not very balanced -- the work load <i>
-looks</i> like it is evenly distributed because we're giving each thread 1/n 
+looks</i> like it is evenly distributed because we're giving each thread 1/n<sup>th</sup> 
 (where n is the number of processors) of the work, but due to the nature of the 
 work, CPU cores are not efficiently used -- the thread with the lowest number 
 range finishes much sooner than the thread with the highest number range.</p>
+<h3>Asking for Work vs. Telling the Thread What Work to Do</h3>
+<p>A clue as to whether your threads are optimized is this: are you telling your 
+threads what work to do, or are your threads requesting work?&nbsp; In the 
+threaded brute force algorithm above, we are <i>telling</i> the thread what work 
+it should be doing.&nbsp; In this next iteration, the thread will be <i>asking</i> 
+for work when it is available.</p>
+<p>Calling the algorithm</p>
+<pre>DurationOf(ThreadedGetNextWorkItemBruteForce, &quot;Threaded get next work item brute force:&quot;);</pre>
+<p>The implementation:</p>
+<pre>static int ThreadedGetNextWorkItemBruteForce()
+{
+  List&lt;(Thread thread, int threadNum)&gt; threads = new List&lt;(Thread thread, int threadNum)&gt;();
+  int numProcs = Environment.ProcessorCount;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var thread = new Thread(new ParameterizedThreadStart(NextWorkItemBruteForceThread));
+    thread.IsBackground = true;
+    threads.Add((thread, i));
+  }
+
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  threads.ForEach(t =&gt; t.thread.Start(t.threadNum));
+  threads.ForEach(t =&gt; t.thread.Join());
+
+  return totalNumPrimes;
+}</pre>
+<p>The worker thread:</p>
+<pre>static void NextWorkItemBruteForceThread(object parms)
+{
+  int threadNum = (int)parms;
+  DurationOf(() =&gt;
+  {
+    int numPrimes = 0;
+    int n;
+
+    while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)
+    {
+      if (IsPrime(n))
+      {
+        ++numPrimes;
+      }
+    }
+
+    Interlocked.Add(ref totalNumPrimes, numPrimes);
+
+    return numPrimes;
+  }, $&quot;Thread: {threadNum}&quot;);
+}</pre>
+<p>The results:</p>
+<pre>Thread: 3
+Number of primes is : 10446
+Total seconds = 13.2079996
+Thread: 2
+Number of primes is : 10378
+Total seconds = 13.2079996
+Thread: 0
+Number of primes is : 10437
+Total seconds = 13.2079996
+Thread: 1
+Number of primes is : 10277
+Total seconds = 13.2079996
+Threaded get next work item brute force:
+Number of primes is : 41538
+Total seconds = 13.2079996</pre>
+<p>Notice now that each thread actually runs for exactly the same amount of time 
+(that was actually a fluke of that particular test run, they do vary ever so 
+slightly.)&nbsp; Also notice we're using our threads efficiently now -- we've 
+shaved 6 seconds off the processing time because each core is fully utilized!</p>
+<h3>Interlocked and Atomic</h3>
+<p>Notice these two lines:</p>
+<pre>while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)
+...
+Interlocked.Add(ref totalNumPrimes, numPrimes);</pre>
+<p>The way this worker thread requests work is to simply get the next number to 
+process -- there's no queuing of work, semaphores, or other complexity.&nbsp; 
+However, in order to get the next number and update the total count, each thread 
+must ensure that it momentarily blocks the other threads.&nbsp; Otherwise, 
+another thread might get exactly the same number or the total might be updated 
+simultaneously, resulting in an incorrect count.&nbsp; .NET has an <code>Interlocked</code> 
+class (read more
+<a href="https://msdn.microsoft.com/en-us/library/system.threading.interlocked(v=vs.110).aspx">
+here</a>) that ensures that the operation is performed atomically, meaning that, 
+even if several bytes of data are being changed, the operation is treated as a 
+single, synchronous, change.&nbsp; Essentially, it's like writing a <code>lock</code> 
+statement around the operation, however it is much more performant because the 
+generated IL code (and ultimately the assembly code) can take advantage of CPU 
+instructions to exchange the value in memory because you're doing something very 
+specific.&nbsp; Using a <code>lock</code> statement, the compiler has no idea what you're 
+really doing and can't optimize the code for you.&nbsp; In fact, the methods 
+that <code>Interlocked</code> implements closely match the actual Intel CPU instructions<sup>1</sup> that are 
+atomic and can therefore be locked.</p>
+<h2>More &quot;Modern&quot; Ways of Working with Threads</h2>
+<p>Nowadays, the junior programmer probably isn't even instructed regarding the 
+<code>Thread</code> class and is instead taught one or more of the various other ways to fire 
+off a thread.&nbsp; Learning about the underlying Thread class is however 
+important because there are situations when you absolutely want to manage the 
+thread yourself rather than letting the .NET framework manage the thread for 
+you, particularly threads that interact with .NET's <code>ThreadPool</code> (more on that 
+later.)&nbsp; Here are the most common options:</p>
+<ul>
+	<li>Task.Run - forcing an asynchronous method</li>
+	<li>AsParallel - a LINQ extension on an Enumerable</li>
+	<li>await - calling an asynchronous method with a continuation</li>
+	<li>QueueUserWorkItem&nbsp; - queues work</li>
+	<li>BackgroundWorker</li>
+</ul>
+<p>All of these approaches use the .NET's ThreadPool with the potential 
+exception of the &quot;await&quot; syntax in which you have more control over how the task 
+is set up.&nbsp; Each also has its nuances regarding:</p>
+<ul>
+	<li>exception handling</li>
+	<li>cancellation tokens</li>
+	<li>progress reporting</li>
+	<li>use of ThreadPool</li>
+</ul>
+<p>One really needs to understand these nuances and how they affect performance 
+and error handling.</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>WinForm synchronization</p>
+<p>Semaphores and queuing work</p>
+<p>Task.Run</p>
+<p>async tasks</p>
+<p>ThreadPool.QueueUserWorkItem / BackgroundWorker</p>
+<p>Working with the ThreadPool:
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/threading/the-managed-thread-pool">
+https://docs.microsoft.com/en-us/dotnet/standard/threading/the-managed-thread-pool</a> </p>
 <p>Thread / Task Cancellation</p>
 <p>Thread Exceptions</p>
-<p>&nbsp;</p>
+<p><sup>1</sup> -&nbsp; the Intel CPU LOCK instruction supports ADD, ADC, AND, 
+BTC, BTR, BTS, CMPXCHG, CMPXCH8B, DEC, INC, NEG, NOT, OR, SBB, SUB, XOR, XADD, 
+and XCHG</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
