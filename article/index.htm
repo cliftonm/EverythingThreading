@@ -263,6 +263,7 @@ Total seconds = 19.2458287</pre>
 <p>This isn't just an anomaly, this is a consistent repeatable difference.&nbsp; 
 I have not found any discussion of why this is the case.</p>
 <h2>Balancing the Brute Force Algorithm Threads</h2>
+<p><img border="0" src="cpua1.png" width="440" height="248"></p>
 <p>Notice that the worker threads are not very balanced -- the work load <i>
 looks</i> like it is evenly distributed because we're giving each thread 1/n<sup>th</sup> 
 (where n is the number of processors) of the work, but due to the nature of the 
@@ -319,6 +320,7 @@ for work when it is available.</p>
   }, $&quot;Thread: {threadNum}&quot;);
 }</pre>
 <p>The results:</p>
+<p><img border="0" src="cpua2.png" width="434" height="245"></p>
 <pre>Thread: 3
 Number of primes is : 10446
 Total seconds = 13.2079996
@@ -337,7 +339,8 @@ Total seconds = 13.2079996</pre>
 <p>Notice now that each thread actually runs for exactly the same amount of time 
 (that was actually a fluke of that particular test run, they do vary ever so 
 slightly.)&nbsp; Also notice we're using our threads efficiently now -- we've 
-shaved 6 seconds off the processing time because each core is fully utilized!</p>
+shaved 6 seconds off the processing time because each core is fully utilized, 
+and the core utilization is much more efficient.</p>
 <h3>Interlocked and Atomic</h3>
 <p>Notice these two lines:</p>
 <pre>while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)
@@ -433,7 +436,7 @@ Total seconds = 11.7134212
 Threaded get next work item brute force:
 Number of primes is : 41538
 Total seconds = 11.7304613</pre>
-<p>So that's neat -- we timing is essentially identical.</p>
+<p>So that's neat -- the timing is essentially identical.</p>
 <h3>Task.Run</h3>
 <p><code>Task.Run</code> is one of the ways to implement a task-based 
 asynchronous pattern<sup>3</sup> (TAP) quickly to create a worker thread.&nbsp; This is 
@@ -484,7 +487,125 @@ Total seconds = 11.9374993
 Task.Run get next work item brute force:
 Number of primes is : 41538
 Total seconds = 11.953198</pre>
-<p>A different (I'm not going to argue better or worse) implementation exposes </p>
+<h3>Using await</h3>
+<p>This is a very simple example in which the above code is modified slightly to 
+use the <code>await</code> keyword.&nbsp; Using <code>await</code> (along with the <code>async</code> 
+keyword) has the following effect:</p>
+<ol>
+	<li>The method initiates the asynchronous process</li>
+<li>It then immediately returns to the caller</li>
+	<li>When the asynchronous process completes, code execution continues with 
+	the code immediately after the <code>await</code> statement.</li>
+</ol>
+<p>There's a few &quot;gotcha's&quot; in this.&nbsp; First, it is useful to be aware 
+of the context in which the continuation is executed.&nbsp; For WinForm 
+applications in which the <code>await</code> was called on the application thread 
+(the thread running the UI), execution 
+is marshaled to continue on the application (UI) thread.&nbsp; If you're running a 
+non-UI application, the continuation can occur on the same thread to which the 
+asynchronous method was assigned, or a new thread!&nbsp; This behavior is 
+controlled by the <code>SynchronizationContext</code><sup>5,6</sup> and discussion of this 
+class is beyond the scope of this article.&nbsp; There's a good Code Project 
+article series on the topic:
+<a href="https://www.codeproject.com/Articles/31971/Understanding-SynchronizationContext-Part-I">
+Part I</a>,
+<a href="https://www.codeproject.com/Articles/32113/Understanding-SynchronizationContext-Part-II">
+Part II</a>,
+<a href="https://www.codeproject.com/Articles/32119/Understanding-SynchronizationContext-Part-III">
+Part III</a>.</p>
+<p>Second, I find the mental gyrations of &quot;return to caller and continue later&quot; 
+to be difficult.&nbsp; The reason for this is that it's not obvious to the method performing the call 
+to an <code>async</code> method will return immediately.&nbsp; This is why the guidance on 
+these method names is to append them with &quot;Async&quot;.</p>
+<p>Thirdly, the mental gyrations get even harder when there are nested <code>await</code> calls.</p>
+<p>Conversely, the Task class provides some really useful features, particularly 
+with regards to returning a result and passing exceptions back to you if an 
+exception occurs while executing the task.</p>
+<p>First, the implementation for the very simple example:</p>
+<pre>static int TaskAwaitGetNextWorkItemBruteForce()
+{
+  int numProcs = Environment.ProcessorCount;
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  List&lt;Task&gt; tasks = new List&lt;Task&gt;();
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var task = DoWorkAsync(i);
+    tasks.Add(task);
+  }
+
+  Task.WaitAll(tasks.ToArray());
+  
+  return totalNumPrimes;
+}
+
+static async Task DoWorkAsync(int threadNum)
+{
+  await Task.Run(() =&gt; NextWorkItemBruteForceThread(threadNum));
+}</pre>
+<p>Here, <code>DoWorkAsync</code> initiates the work and the <code>await</code> returns to the caller, 
+<code>TaskAwaitGetNextWorkItemBruteForce</code>.&nbsp; This example is 
+over-simplified because there is no continuation.&nbsp; Also notice that 
+<code>DoWorkAsync</code> returns a Task but there's no explicit <code>return myTask;</code> statement.&nbsp; 
+An <code>async</code> method can return a <code>Task&lt;TResult&gt;</code>, <code>Task</code>, <code>void</code>, or (C# 7) a type 
+implementing a public <code>GetAwaiter</code> method<sup>7</sup>.</p>
+<p>Let's look at a more useful example next -- here you'll see that we 
+can remove the global variables that <code>NextWorkItemBruteForceThread</code> 
+uses and instead return the result of the algorithm in the <code>TResult</code> 
+generic type.&nbsp; This also removes the <code>Interlocked</code> call: <code>Interlocked.Add(ref 
+totalNumPrimes, numPrimes)</code> which greatly improves the compartmentalization of 
+the thread.&nbsp; Instead, we'll compute the total number of primes by summing 
+the primes found by each asynchronous task.</p>
+<p>The algorithm implementation:</p>
+<pre>static int AwaitableBruteForceAlgorithm(object parms)
+{
+  int threadNum = (int)parms;
+  int numPrimes = 0;
+
+  DurationOf(() =&gt;
+  {
+    int n;
+
+    while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)
+    {
+      if (IsPrime(n))
+      {
+        ++numPrimes;
+      }
+    }
+
+    return numPrimes;
+  }, $&quot;Thread: {threadNum}&quot;);
+
+  return numPrimes;
+}</pre>
+<p>The implementation:</p>
+<pre>static int TaskAwaitGetNextWorkItemBruteForceWithReturn()
+{
+  int numProcs = Environment.ProcessorCount;
+  nextNumber = 1;
+  List&lt;Task&lt;int&gt;&gt; tasks = new List&lt;Task&lt;int&gt;&gt;();
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var task = DoWorkWithReturnAsync(i);
+    tasks.Add(task);
+  }
+
+  Task.WaitAll(tasks.ToArray());
+
+  return tasks.Sum(t =&gt; t.Result);
+}
+
+static async Task&lt;int&gt; DoWorkWithReturnAsync(int threadNum)
+{
+  return await Task.Run(() =&gt; AwaitableBruteForceAlgorithm(threadNum));
+}</pre>
+<p>Notice here that the <code>DoWorkWithReturnAsync</code> method now requires a <code>return</code> 
+keyword!&nbsp; Also, we're no longer using the global <code>totalNumPrimes</code>, as the 
+results of all the tasks, once their complete, is summed and returned.</p>
+<p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
@@ -516,6 +637,14 @@ https://docs.microsoft.com/en-us/dotnet/standard/asynchronous-programming-patter
 <p><sup>4</sup> -
 <a href="https://msdn.microsoft.com/en-us/library/windows/desktop/ms686908(v=vs.85).aspx">
 https://msdn.microsoft.com/en-us/library/windows/desktop/ms686908(v=vs.85).aspx</a> </p>
+<p><sup>5</sup> -
+<a href="https://msdn.microsoft.com/en-us/library/system.threading.synchronizationcontext(v=vs.110).aspx">
+https://msdn.microsoft.com/en-us/library/system.threading.synchronizationcontext(v=vs.110).aspx</a> </p>
+<p><sup>6</sup> - <a href="https://msdn.microsoft.com/magazine/gg598924.aspx">
+https://msdn.microsoft.com/magazine/gg598924.aspx</a> </p>
+<p><sup>7</sup> -
+<a href="https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/concepts/async/async-return-types">
+https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/concepts/async/async-return-types</a> </p>
 <p>&nbsp;</p>
 <p>Calling the algorithm:</p>
 <p>The implementation:</p>

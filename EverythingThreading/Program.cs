@@ -32,7 +32,13 @@ namespace Primes
             // DurationOf(AsParallelGetNextWorkItemBruteForce, "AsPrallel get next work item brute force:");
             Console.WriteLine();
 
-            DurationOf(TaskRunGetNextWorkItemBruteForce, "Task.Run get next work item brute force:");
+            // DurationOf(TaskRunGetNextWorkItemBruteForce, "Task.Run get next work item brute force:");
+            Console.WriteLine();
+
+            DurationOf(TaskAwaitGetNextWorkItemBruteForce, "await Task.Run get next work item brute force:");
+            Console.WriteLine();
+
+            DurationOf(TaskAwaitGetNextWorkItemBruteForceWithReturn, "await Task.Run get next work item with return brute force:");
             Console.WriteLine();
 
             // DurationOf(ThreadedGetNextWorkItemSieve, "Threaded get next work item sieve:");
@@ -153,6 +159,57 @@ namespace Primes
             return totalNumPrimes;
         }
 
+        // ====================================
+
+        static int TaskAwaitGetNextWorkItemBruteForce()
+        {
+            int numProcs = Environment.ProcessorCount;
+            totalNumPrimes = 0;
+            nextNumber = 1;
+            List<Task> tasks = new List<Task>();
+
+            for (int i = 0; i < numProcs; i++)
+            {
+                var task = DoWorkAsync(i);
+                tasks.Add(task);
+            }
+
+            Task.WaitAll(tasks.ToArray());
+
+            return totalNumPrimes;
+        }
+
+        static async Task DoWorkAsync(int threadNum)
+        {
+            await Task.Run(() => NextWorkItemBruteForceThread(threadNum));
+        }
+
+        // ====================================
+
+        static int TaskAwaitGetNextWorkItemBruteForceWithReturn()
+        {
+            int numProcs = Environment.ProcessorCount;
+            nextNumber = 1;
+            List<Task<int>> tasks = new List<Task<int>>();
+
+            for (int i = 0; i < numProcs; i++)
+            {
+                var task = DoWorkWithReturnAsync(i);
+                tasks.Add(task);
+            }
+
+            Task.WaitAll(tasks.ToArray());
+
+            return tasks.Sum(t => t.Result);
+        }
+
+        static async Task<int> DoWorkWithReturnAsync(int threadNum)
+        {
+            return await Task.Run(() => AwaitableBruteForceAlgorithm(threadNum));
+        }
+
+        // ====================================
+
         static int ThreadedGetNextWorkItemSieve()
         {
             List<(Thread thread, int threadNum)> threads = new List<(Thread thread, int threadNum)>();
@@ -244,6 +301,29 @@ namespace Primes
                 Interlocked.Add(ref totalNumPrimes, numPrimes);
                 return numPrimes;
             }, $"Thread: {threadNum}");
+        }
+
+        static int AwaitableBruteForceAlgorithm(object parms)
+        {
+            int threadNum = (int)parms;
+            int numPrimes = 0;
+
+            DurationOf(() =>
+            {
+                int n;
+
+                while ((n = Interlocked.Increment(ref nextNumber)) < MAX)
+                {
+                    if (IsPrime(n))
+                    {
+                        ++numPrimes;
+                    }
+                }
+
+                return numPrimes;
+            }, $"Thread: {threadNum}");
+
+            return numPrimes;
         }
 
         static void NextWorkItemSieveThread(object parms)
