@@ -44,7 +44,7 @@ namespace TWinForm
 
     public partial class Form1 : Form
     {
-        int MAX = 50000;
+        int MAX = 500000;
         int nextNumber = 1;
         object locker = new object();
 
@@ -123,11 +123,15 @@ namespace TWinForm
 
         protected async Task<int> DoWorkWithReturnAsyncAndContinuation(int threadNum)
         {
+            DateTime start = DateTime.Now;
             var t = await Task.Run(() => BruteForceAlgorithm(threadNum)); //.ConfigureAwait(true);
+
+            DateTime stop = DateTime.Now;
 
             lock (locker)
             {
                 tbOutput.AppendLine("Continuation: Thread number " + threadNum + " finished.");
+                tbOutput.AppendLine("Total seconds = " + (stop - start).TotalSeconds);
                 tbOutput.AppendLine("Continuation: Count = " + t);
             }
 
