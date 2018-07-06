@@ -121,19 +121,35 @@ namespace TWinForm
             return tasks;
         }
 
+        // Can't do this:
+        /*
+        protected async int TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation()
+        {
+            int numProcs = Environment.ProcessorCount;
+            nextNumber = 1;
+            DateTime start = DateTime.Now;
+            int numPrimes = 0;
+
+            for (int i = 0; i < numProcs; i++)
+            {
+                tbOutput.AppendLine("Starting thread " + i + " at " + (DateTime.Now - start).TotalMilliseconds + " ms");
+                numPrimes += await Task.Run(() => BruteForceAlgorithm(i));
+            }
+
+            return numPrimes;
+        }
+        */
+
         protected async Task<int> DoWorkWithReturnAsyncAndContinuation(int threadNum)
         {
             DateTime start = DateTime.Now;
-            var t = await Task.Run(() => BruteForceAlgorithm(threadNum)); //.ConfigureAwait(true);
+            var t = await Task.Run(() => BruteForceAlgorithm(threadNum)).ConfigureAwait(true);
 
             DateTime stop = DateTime.Now;
 
-            lock (locker)
-            {
-                tbOutput.AppendLine("Continuation: Thread number " + threadNum + " finished.");
-                tbOutput.AppendLine("Total seconds = " + (stop - start).TotalSeconds);
-                tbOutput.AppendLine("Continuation: Count = " + t);
-            }
+            tbOutput.AppendLine("Continuation: Thread number " + threadNum + " finished.");
+            tbOutput.AppendLine("Total seconds = " + (stop - start).TotalSeconds);
+            tbOutput.AppendLine("Continuation: Count = " + t);
 
             return t;
         }

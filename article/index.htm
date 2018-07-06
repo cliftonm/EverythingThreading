@@ -724,114 +724,121 @@ await Task.Run get next work item with return brute force and continuation:
 Number of primes is : 41538
 Total seconds = 13.4070216</pre>
 <h3>Using await in WinForm Applications</h3>
-<p><img border="0" src="winform1.png" width="403" height="423"></p>
-<p>Taking that last algorithm above, let's look at what happens when we run this 
-in a WinForm application instead of a console application.&nbsp; We get this 
-result:</p>
-<pre>Starting thread 0 at 0 ms
-Starting thread 1 at 5.214 ms
-Starting thread 2 at 5.214 ms
-Starting thread 3 at 6.2169 ms
-Thread: 3
-Number of primes is : 7606
-Total seconds = 13.7766322
-Thread number 3 finished.
-Count = 7606
-Thread: 2
-Number of primes is : 11114
-Total seconds = 14.7672651
-Thread: 1
-Number of primes is : 11162
-Total seconds = 14.7692709
-Thread number 1 finished.
-Count = 11162
-Thread: 0
-Number of primes is : 11656
-Total seconds = 14.7702734
-Thread number 0 finished.
-Count = 11656
-Thread number 2 finished.
-Count = 11114
-await Task.Run get next work item with return brute force and continuation:
-Number of primes is : 41538
-Total seconds = 14.7945692</pre>
-<p>Surprisingly, I have to marshal the textbox output onto the UI thread:</p>
-<pre>public static class ExtensionMethods
+<p>In the above console application, DurationOf is a thread blocking method, 
+waiting until all the tasks complete.&nbsp; This is completely unsuitable in a 
+WinForm application:</p>
+<ol>
+	<li>Blocking the main UI thread prevents the application's message pump from 
+	processed Windows messages.</li>
+	<li>Calls to <code>Invoke</code> for performing a UI update from a non-UI thread use the 
+	application's message pump to marshall the call onto the main UI thread.</li>
+	<li>When the main UI thread is blocked, messages aren't processed, and a 
+	deadlock occurs between the blocked UI thread and the thread requesting the 
+	<code>Invoke</code>.</li>
+	<li>Calls to <code>BeginInvoke</code> perform the UI thread asynchronously, so should not 
+	deadlock.</li>
+</ol>
+<p>However:</p>
+<ol>
+	<li>The whole point is that it is desirable to use await and tasks <i>
+	without having to call Invoke or BeginInvoke.</i>&nbsp; </li>
+	<li>The await <i>should return control to the UI thread</i>.&nbsp; </li>
+	<li>The only time we would need to use Invoke or BeginInvoke is if we're 
+	updating the UI in the non-UI thread, which ought to be avoided if possible.</li>
+	<li>And most importantly, the main UI thread should not be blocked!</li>
+</ol>
+<p>To achieve this, special care also must be taken with regards to how async 
+methods are nested, so that the await returns immediately to the desired caller.&nbsp; 
+I consider this an important point -- using async and await requires that your 
+method call hierarchy has the correct structure to handle the immediate return 
+to the caller.</p>
+<h4>Task Initialization</h4>
+<p>We're going to start the threads as soon as the form is shown, but this <i>
+cannot block the UI thread:</i></p>
+<pre>public Form1()
 {
-  public static void AppendLine(this TextBox tb, string text)
-  {
-    tb.Invoke(() =&gt; tb.AppendText(text + &quot;\r\n&quot;));
-  }
+  InitializeComponent();
+  Shown += OnFormShown;
+}
 
-  public static void Invoke(this Control control, Action action)
-  {
-    if (control.InvokeRequired)
-    {
-      // We want a synchronous call here!!!!
-      control.Invoke((Delegate)action);
-    }
-    else
-    {
-      action();
-    }
-  }
-}</pre>
-<p>Earlier I had said that the continuation in a WinForm application is on the 
-caller thread, which would be the UI thread.&nbsp; What's going on?&nbsp; Well, 
-quite a mess actually.&nbsp; First, the <code>DurationOf</code> method:</p>
-<pre>protected void DurationOf(Func&lt;int&gt; action, string section)
+private async void OnFormShown(object sender, EventArgs e)
 {
-  var start = DateTime.Now;
-  int numPrimes = action();
-  var stop = DateTime.Now;
-
-  lock (locker)
-  {
-    tbOutput.AppendLine(section);
-    tbOutput.AppendLine(&quot;Number of primes is : &quot; + numPrimes);
-    tbOutput.AppendLine(&quot;Total seconds = &quot; + (stop - start).TotalSeconds);
-  }
-}</pre>
-<p>is executing on a non-UI thread, so those <code>AppendLine</code> (an extension method I 
-wrote) calls must be marshaled onto the UI thread:</p>
-<pre>tbOutput.BeginInvoke(() =&gt;
-{
-  tbOutput.AppendLine(section);
+  List&lt;Task&lt;int&gt;&gt; tasks = TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation();
+  await Task.WhenAll(tasks);
+  int numPrimes = tasks.Sum(t =&gt; t.Result);
   tbOutput.AppendLine(&quot;Number of primes is : &quot; + numPrimes);
-  tbOutput.AppendLine(&quot;Total seconds = &quot; + (stop - start).TotalSeconds);
-});</pre>
-<p>Second, we have a deadlock because the process is initiated in the Shown 
-event handler:</p>
-<pre>private void OnFormShown(object sender, EventArgs e)
-{
-  DurationOf(
-    TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation,
-      &quot;await Task.Run get next work item with return brute force and continuation:&quot;);
 }</pre>
-<p>this blocks the UI thread because we wait for the tasks to complete:</p>
-<pre>Task.WaitAll(tasks.ToArray());</pre>
-<p>The call to perform the work:</p>
-<pre>var t = await Task.Run(() =&gt; AwaitableBruteForceAlgorithm(threadNum));</pre>
-<p>will attempt to marshal back onto the UI thread, but it can't process the 
-behind-the-scenes message that is queued onto the UI message queue because the 
-UI thread is waiting for the tasks to complete -- therefore the continuation 
-never happens and the task is also not completed.&nbsp; The above line is the 
-equivalent of:</p>
-<pre>var t = await Task.Run(() =&gt; AwaitableBruteForceAlgorithm(threadNum)).ConfigureAwait(true);</pre>
-<p>which is the default behavior -- try to execute the continuation on the 
-thread awaiting the task.&nbsp; If we use:</p>
-<pre>var t = await Task.Run(() =&gt; AwaitableBruteForceAlgorithm(threadNum)).ConfigureAwait(false);</pre>
-<p>then the task completes and the continuation executes on the same thread (or 
-it can execute on a new thread) as the thread the task was running on.&nbsp; 
-However, this means that we now need to marshal the textbox updates onto the UI 
-thread.&nbsp; We can't wrap the implementation of <code>OnFormShown</code> in a task, because 
-that creates a thread, so we're no longer on the UI thread even if we use 
-<code>ConfigureAwait(true)</code>. </p>
-<p>This is the conundrum of <i>CPU bound</i> work -- a task that is not 
-associated with an I/O completion event but rather executes cycles on the caller 
-thread until the work is done.&nbsp; The fix for this is to invert the idea 
-above -- the task itself (<code>AwaitableBruteForceAlgorithm</code>) must itself create an 
-inner task, which we don't care is running on a new thread:</p>
+<p>In <code>OnFormShown</code>, the method that starts all the tasks 
+(<code>TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation</code>) returns those 
+tasks.&nbsp; Then we wait until this tasks all complete with 
+<code>Task.WhenAll(tasks)</code>.&nbsp; We <i>await</i> this, which immediately exits out of 
+the <code>OnFormShown</code> method -- our UI thread is NOT blocked!&nbsp; Once 
+the tasks complete, the <i>continuation</i> executes, summing the results of 
+each task and displaying the total number of primes found.&nbsp; Because the 
+synchronization context is a WinForm application, then continuation is itself 
+marshalled back onto the main UI thread, so when we append the line to tbOutput, 
+we don't need to do the marshalling ourselves with <code>Invoke</code> or <code>BeginInvoke</code>.</p>
+<h4>Creating Each Task</h4>
+<pre>protected List&lt;Task&lt;int&gt;&gt; TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation()
+{
+  int numProcs = Environment.ProcessorCount;
+  nextNumber = 1;
+  List&lt;Task&lt;int&gt;&gt; tasks = new List&lt;Task&lt;int&gt;&gt;();
+  DateTime start = DateTime.Now;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    tbOutput.AppendLine(&quot;Starting thread &quot; + i + &quot; at &quot; + (DateTime.Now - start).TotalMilliseconds + &quot; ms&quot;);
+    var task = DoWorkWithReturnAsyncAndContinuation(i);
+    tasks.Add(task);
+  }
+
+  return tasks;
+}</pre>
+<p>Notice that this method does not actually create the tasks.&nbsp; It instead 
+calls <code>DoWorkWithReturnAsyncAndContinuation</code>.&nbsp; The reason is so that the 
+await in <code>DoWorkWithReturnAsyncAndContinuation</code> returns to the caller, which is 
+the code shown above, so that the next thread can be created.&nbsp; We can't 
+even write the method with an embedded Task.Run():</p>
+<p><img border="0" src="cantdo.png" width="798" height="247"></p>
+<p>And even if we could, the <code>await</code> would return immediately to the caller.&nbsp; 
+When the task completed, the continuation would execute the next iteration of 
+the for loop and start the next thread.&nbsp; Since no other threads were 
+picking up work, all the work would have been done by the first thread!</p>
+<p>Instead, it is the <code>DoWorkWithReturnAsyncAndContinuation</code> method that actually 
+gets around to creating the task:</p>
+<pre>protected async Task&lt;int&gt; DoWorkWithReturnAsyncAndContinuation(int threadNum)
+{
+  DateTime start = DateTime.Now;
+  var t = await Task.Run(() =&gt; BruteForceAlgorithm(threadNum)); //.ConfigureAwait(true);
+
+  DateTime stop = DateTime.Now;
+
+  tbOutput.AppendLine(&quot;Continuation: Thread number &quot; + threadNum + &quot; finished.&quot;);
+  tbOutput.AppendLine(&quot;Total seconds = &quot; + (stop - start).TotalSeconds);
+  tbOutput.AppendLine(&quot;Continuation: Count = &quot; + t);
+
+  return t;
+}</pre>
+<p>Because <code>Task.Run</code> is being called from the application's UI thread, the 
+continuation is executed on the &quot;captured context&quot; - the UI thread.&nbsp; This 
+is equivalent to adding <code>.ConfigureAwait(true)</code>.&nbsp; If we used 
+<code>.ConfigureAwait(false)</code>, the continuation may or may not execute on the captured 
+context thread, in which case the UI outputs would have to be marshalled with 
+<code>Invoke</code> or <code>BeginInvoke</code>.&nbsp; It's also worth pointing 
+out that we don't need to <code>lock</code> the output to the UI to ensure that the lines are 
+written in the correct sequence.&nbsp; Because we're continuing on the captured 
+context (the UI thread) and there's only ever one UI thread, we're guaranteed 
+that all three <code>AppendLine</code> calls occur contiguously, regardless of whether 
+another task finishes in the meantime.&nbsp; That task's continuation will be 
+blocked until our continuation exits.</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
