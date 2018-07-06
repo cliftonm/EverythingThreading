@@ -1,8 +1,6 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -35,10 +33,13 @@ namespace Primes
             // DurationOf(TaskRunGetNextWorkItemBruteForce, "Task.Run get next work item brute force:");
             Console.WriteLine();
 
-            DurationOf(TaskAwaitGetNextWorkItemBruteForce, "await Task.Run get next work item brute force:");
+            // DurationOf(TaskAwaitGetNextWorkItemBruteForce, "await Task.Run get next work item brute force:");
             Console.WriteLine();
 
-            DurationOf(TaskAwaitGetNextWorkItemBruteForceWithReturn, "await Task.Run get next work item with return brute force:");
+            // DurationOf(TaskAwaitGetNextWorkItemBruteForceWithReturn, "await Task.Run get next work item with return brute force:");
+            Console.WriteLine();
+
+            DurationOf(TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation, "await Task.Run get next work item with return brute force and continuation:");
             Console.WriteLine();
 
             // DurationOf(ThreadedGetNextWorkItemSieve, "Threaded get next work item sieve:");
@@ -191,9 +192,11 @@ namespace Primes
             int numProcs = Environment.ProcessorCount;
             nextNumber = 1;
             List<Task<int>> tasks = new List<Task<int>>();
+            DateTime start = DateTime.Now;
 
             for (int i = 0; i < numProcs; i++)
             {
+                Console.WriteLine("Starting thread " + i + " at " + (DateTime.Now - start).TotalMilliseconds + " ms");
                 var task = DoWorkWithReturnAsync(i);
                 tasks.Add(task);
             }
@@ -206,6 +209,40 @@ namespace Primes
         static async Task<int> DoWorkWithReturnAsync(int threadNum)
         {
             return await Task.Run(() => AwaitableBruteForceAlgorithm(threadNum));
+        }
+
+        // ====================================
+
+        static int TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation()
+        {
+            int numProcs = Environment.ProcessorCount;
+            nextNumber = 1;
+            List<Task<int>> tasks = new List<Task<int>>();
+            DateTime start = DateTime.Now;
+
+            for (int i = 0; i < numProcs; i++)
+            {
+                Console.WriteLine("Starting thread " + i + " at " + (DateTime.Now - start).TotalMilliseconds + " ms");
+                var task = DoWorkWithReturnAsyncAndContinuation(i);
+                tasks.Add(task);
+            }
+
+            Task.WaitAll(tasks.ToArray());
+
+            return tasks.Sum(t => t.Result);
+        }
+
+        static async Task<int> DoWorkWithReturnAsyncAndContinuation(int threadNum)
+        {
+            var t = await Task.Run(() => AwaitableBruteForceAlgorithm(threadNum));
+
+            lock (locker)
+            {
+                Console.WriteLine("Thread number " + threadNum + " finished.");
+                Console.WriteLine("Count = " + t);
+            }
+
+            return t;
         }
 
         // ====================================

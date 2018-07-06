@@ -375,6 +375,14 @@ later.)&nbsp; Here are the most common options:</p>
 <ul>
 	<li>AsParallel - a LINQ extension on an Enumerable</li>
 	<li>Task.Run - forcing an asynchronous method</li>
+	<li>Task.Factory.StartNew<sup>8</sup> - equivalent to Task.Run but with some 
+	defaults:<ul>
+	<li>no cancellation token</li>
+	<li>children cannot attach</li>
+	<li>default task scheduler</li>
+</ul>
+	</li>
+	<li>AsParallel - a PLINQ (parallel LINQ) extension on an Enumerable</li>
 	<li>await - calling an asynchronous method with a continuation</li>
 	<li>QueueUserWorkItem&nbsp; - queues work</li>
 	<li>BackgroundWorker</li>
@@ -518,7 +526,7 @@ to be difficult.&nbsp; The reason for this is that it's not obvious to the metho
 to an <code>async</code> method will return immediately.&nbsp; This is why the guidance on 
 these method names is to append them with &quot;Async&quot;.</p>
 <p>Thirdly, the mental gyrations get even harder when there are nested <code>await</code> calls.</p>
-<p>Conversely, the Task class provides some really useful features, particularly 
+<p>Conversely, the <code>Task</code> class provides some really useful features, particularly 
 with regards to returning a result and passing exceptions back to you if an 
 exception occurs while executing the task.</p>
 <p>First, the implementation for the very simple example:</p>
@@ -605,14 +613,228 @@ static async Task&lt;int&gt; DoWorkWithReturnAsync(int threadNum)
 <p>Notice here that the <code>DoWorkWithReturnAsync</code> method now requires a <code>return</code> 
 keyword!&nbsp; Also, we're no longer using the global <code>totalNumPrimes</code>, as the 
 results of all the tasks, once their complete, is summed and returned.</p>
+<p>Let's make this example a wee bit more useful by adding a continuation that 
+indicates that the thread is complete, and see what happens.</p>
+<p>The implementation:</p>
+<pre>static int TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation()
+{
+  int numProcs = Environment.ProcessorCount;
+  nextNumber = 1;
+  List&lt;Task&lt;int&gt;&gt; tasks = new List&lt;Task&lt;int&gt;&gt;();
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+   Console.WriteLine(&quot;Starting thread &quot; + i + &quot; at &quot; + (DateTime.Now - start).TotalMilliseconds + &quot; ms&quot;);
+   var task = DoWorkWithReturnAsyncAndContinuation(i);
+    tasks.Add(task);
+  }
+
+  Task.WaitAll(tasks.ToArray());
+
+    return tasks.Sum(t =&gt; t.Result);
+  }
+
+  static async Task&lt;int&gt; DoWorkWithReturnAsyncAndContinuation(int threadNum)
+  {
+    var t = await Task.Run(() =&gt; AwaitableBruteForceAlgorithm(threadNum));
+
+    lock (locker)
+    {
+      Console.WriteLine(&quot;Thread number &quot; + threadNum + &quot; finished.&quot;);
+    }
+
+  return t;
+}</pre>
+<p>The results:</p>
+<pre>Starting thread 0 at 0 ms
+Starting thread 1 at 0 ms
+Starting thread 2 at 0 ms
+Starting thread 3 at 0 ms
+Thread: 3
+Number of primes is : 10431
+Total seconds = 13.4916976
+Thread number 3 finished.
+Thread: 2
+Number of primes is : 10205
+Total seconds = 13.4916976
+Thread number 2 finished.
+Thread: 0
+Number of primes is : 10442
+Total seconds = 13.4916976
+Thread number 0 finished.
+Thread: 1
+Number of primes is : 10460
+Total seconds = 13.4916976
+Thread number 1 finished.
+await Task.Run get next work item with return brute force and continuation:
+Number of primes is : 41538
+Total seconds = 13.5073256</pre>
+<p>So this code should strike you as non-intuitive:</p>
+<pre>static async Task&lt;int&gt; DoWorkWithReturnAsyncAndContinuation(int threadNum)
+{
+  var t = await Task.Run(() =&gt; AwaitableBruteForceAlgorithm(threadNum));
+
+  lock (locker)
+  {
+    Console.WriteLine(&quot;Thread number &quot; + threadNum + &quot; finished.&quot;);
+  }
+
+  return t;
+}</pre>
+<p>The await should return to the caller.&nbsp; It does -- we know this because 
+we note that the tasks are created all at once -- there is no delay between the 
+start times.&nbsp; But what does the method return?&nbsp; It returns a <code>Task&lt;int&gt;</code>, 
+and the return statement is <i>after</i> the continuation.&nbsp; It's <i>not 
+part of the continuation</i> which, when you think about it, can't return 
+anything anyways!&nbsp; Furthermore, <code>t</code>, when used <i>inside the 
+continuation</i> is the return (an int) of the method we're awaiting upon.&nbsp; 
+So if we wanted to output the count of primes: we would write:</p>
+<pre>Console.WriteLine(&quot;Count = &quot; + t);</pre>
+<p>and <i>not</i> <code>t.Result</code>.&nbsp; But in the caller that receives 
+<code>Task&lt;int&gt;</code>, we have to use <code>t.Result</code>.&nbsp; Wow.&nbsp; 
+Just Wow, I say.&nbsp; And yes, if you're task creates another task, the outer 
+return type is <code>Task&lt;Task&gt;</code>.&nbsp; If it's a three layer nested task, the return 
+type will be <code>Task&lt;Task&lt;Task&gt;&gt;&gt;</code>.&nbsp; See what I mean by mind warping?</p>
+<p>console output (your mileage will vary):</p>
+<pre>Starting thread 0 at 0 ms
+Starting thread 1 at 6.3902 ms
+Starting thread 2 at 6.3902 ms
+Starting thread 3 at 6.3902 ms
+Thread: 0
+Number of primes is : 10428
+Total seconds = 13.3906041
+Thread number 0 finished.
+Count = 10428
+Thread: 2
+Number of primes is : 10270
+Total seconds = 13.3916069
+Thread: 3
+Number of primes is : 10382
+Total seconds = 13.3916069
+Thread number 3 finished.
+Count = 10382
+Thread: 1
+Number of primes is : 10458
+Total seconds = 13.3916069
+Thread number 1 finished.
+Count = 10458
+Thread number 2 finished.
+Count = 10270
+await Task.Run get next work item with return brute force and continuation:
+Number of primes is : 41538
+Total seconds = 13.4070216</pre>
+<h3>Using await in WinForm Applications</h3>
+<p><img border="0" src="winform1.png" width="403" height="423"></p>
+<p>Taking that last algorithm above, let's look at what happens when we run this 
+in a WinForm application instead of a console application.&nbsp; We get this 
+result:</p>
+<pre>Starting thread 0 at 0 ms
+Starting thread 1 at 5.214 ms
+Starting thread 2 at 5.214 ms
+Starting thread 3 at 6.2169 ms
+Thread: 3
+Number of primes is : 7606
+Total seconds = 13.7766322
+Thread number 3 finished.
+Count = 7606
+Thread: 2
+Number of primes is : 11114
+Total seconds = 14.7672651
+Thread: 1
+Number of primes is : 11162
+Total seconds = 14.7692709
+Thread number 1 finished.
+Count = 11162
+Thread: 0
+Number of primes is : 11656
+Total seconds = 14.7702734
+Thread number 0 finished.
+Count = 11656
+Thread number 2 finished.
+Count = 11114
+await Task.Run get next work item with return brute force and continuation:
+Number of primes is : 41538
+Total seconds = 14.7945692</pre>
+<p>Surprisingly, I have to marshal the textbox output onto the UI thread:</p>
+<pre>public static class ExtensionMethods
+{
+  public static void AppendLine(this TextBox tb, string text)
+  {
+    tb.Invoke(() =&gt; tb.AppendText(text + &quot;\r\n&quot;));
+  }
+
+  public static void Invoke(this Control control, Action action)
+  {
+    if (control.InvokeRequired)
+    {
+      // We want a synchronous call here!!!!
+      control.Invoke((Delegate)action);
+    }
+    else
+    {
+      action();
+    }
+  }
+}</pre>
+<p>Earlier I had said that the continuation in a WinForm application is on the 
+caller thread, which would be the UI thread.&nbsp; What's going on?&nbsp; Well, 
+quite a mess actually.&nbsp; First, the <code>DurationOf</code> method:</p>
+<pre>protected void DurationOf(Func&lt;int&gt; action, string section)
+{
+  var start = DateTime.Now;
+  int numPrimes = action();
+  var stop = DateTime.Now;
+
+  lock (locker)
+  {
+    tbOutput.AppendLine(section);
+    tbOutput.AppendLine(&quot;Number of primes is : &quot; + numPrimes);
+    tbOutput.AppendLine(&quot;Total seconds = &quot; + (stop - start).TotalSeconds);
+  }
+}</pre>
+<p>is executing on a non-UI thread, so those <code>AppendLine</code> (an extension method I 
+wrote) calls must be marshaled onto the UI thread:</p>
+<pre>tbOutput.BeginInvoke(() =&gt;
+{
+  tbOutput.AppendLine(section);
+  tbOutput.AppendLine(&quot;Number of primes is : &quot; + numPrimes);
+  tbOutput.AppendLine(&quot;Total seconds = &quot; + (stop - start).TotalSeconds);
+});</pre>
+<p>Second, we have a deadlock because the process is initiated in the Shown 
+event handler:</p>
+<pre>private void OnFormShown(object sender, EventArgs e)
+{
+  DurationOf(
+    TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation,
+      &quot;await Task.Run get next work item with return brute force and continuation:&quot;);
+}</pre>
+<p>this blocks the UI thread because we wait for the tasks to complete:</p>
+<pre>Task.WaitAll(tasks.ToArray());</pre>
+<p>The call to perform the work:</p>
+<pre>var t = await Task.Run(() =&gt; AwaitableBruteForceAlgorithm(threadNum));</pre>
+<p>will attempt to marshal back onto the UI thread, but it can't process the 
+behind-the-scenes message that is queued onto the UI message queue because the 
+UI thread is waiting for the tasks to complete -- therefore the continuation 
+never happens and the task is also not completed.&nbsp; The above line is the 
+equivalent of:</p>
+<pre>var t = await Task.Run(() =&gt; AwaitableBruteForceAlgorithm(threadNum)).ConfigureAwait(true);</pre>
+<p>which is the default behavior -- try to execute the continuation on the 
+thread awaiting the task.&nbsp; If we use:</p>
+<pre>var t = await Task.Run(() =&gt; AwaitableBruteForceAlgorithm(threadNum)).ConfigureAwait(false);</pre>
+<p>then the task completes and the continuation executes on the same thread (or 
+it can execute on a new thread) as the thread the task was running on.&nbsp; 
+However, this means that we now need to marshal the textbox updates onto the UI 
+thread.&nbsp; We can't wrap the implementation of <code>OnFormShown</code> in a task, because 
+that creates a thread, so we're no longer on the UI thread even if we use 
+<code>ConfigureAwait(true)</code>. </p>
+<p>This is the conundrum of <i>CPU bound</i> work -- a task that is not 
+associated with an I/O completion event but rather executes cycles on the caller 
+thread until the work is done.&nbsp; The fix for this is to invert the idea 
+above -- the task itself (<code>AwaitableBruteForceAlgorithm</code>) must itself create an 
+inner task, which we don't care is running on a new thread:</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>WinForm synchronization</p>
 <p>Semaphores and queuing work</p>
 <p>Task.Run</p>
 <p>async tasks</p>
@@ -645,6 +867,9 @@ https://msdn.microsoft.com/magazine/gg598924.aspx</a> </p>
 <p><sup>7</sup> -
 <a href="https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/concepts/async/async-return-types">
 https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/concepts/async/async-return-types</a> </p>
+<p><sup>8</sup> -
+<a href="https://blogs.msdn.microsoft.com/pfxteam/2011/10/24/task-run-vs-task-factory-startnew/">
+https://blogs.msdn.microsoft.com/pfxteam/2011/10/24/task-run-vs-task-factory-startnew/</a> </p>
 <p>&nbsp;</p>
 <p>Calling the algorithm:</p>
 <p>The implementation:</p>
