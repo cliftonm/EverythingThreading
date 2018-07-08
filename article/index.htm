@@ -15,8 +15,14 @@ concurrent collections, work queues, and thread joining</p>
 <p>I was recently asked to provide some training on how threads are used in C#.&nbsp; 
 What started off as simple (doesn't it always) turned into a detailed analysis 
 of different approaches to threading and various ancillary topics.&nbsp; While 
-this is all been discussed before, I'm not sure there exists a comprehensive 
-look at threading, which hopefully this article succinctly covers.</p>
+this has all been discussed before, I'm hoping that this article provides some 
+interesting insights and coverage of the topic that perhaps hasn't been done 
+before in one article.</p>
+<h3>What Is a Thread?</h3>
+<p>I suppose I should start with a brief description of what a thread is, 
+although quite frankly, I'm assuming you actually know what a thread is.&nbsp; 
+But for the sake of completeness:</p>
+<p>&nbsp;</p>
 <h3>Coming Up With a Good Thread Example</h3>
 <p>The first problem of course is coming up with a good example where the work 
 is capable of being broken up into isolated chunks and that takes a reasonable 
@@ -29,7 +35,7 @@ brute force:</p>
   for (int i = 2; i &lt;= n / 2 &amp;&amp; ret; ret = n % i++ != 0);
   return ret;
 }</pre>
-<p>Yes, there actually is no content to the for loop -- it does end in a <code>;</code>.</p>
+<p>Yes, there actually is no content to the for loop -- it does end with a <code>;</code>.</p>
 <p>Obviously, you would NEVER write a prime number calculation this way (a much 
 better approach is the 
 <a href="https://en.wikipedia.org/wiki/Sieve_of_Eratosthenes">Sieve of 
@@ -373,7 +379,7 @@ thread yourself rather than letting the .NET framework manage the thread for
 you, particularly threads that interact with .NET's <code>ThreadPool</code> (more on that 
 later.)&nbsp; Here are the most common options:</p>
 <ul>
-	<li>AsParallel - a LINQ extension on an Enumerable</li>
+	<li>AsParallel - a PLINQ (Parallel LINQ) extension on an Enumerable</li>
 	<li>Task.Run - forcing an asynchronous method</li>
 	<li>Task.Factory.StartNew<sup>8</sup> - equivalent to Task.Run but with some 
 	defaults:<ul>
@@ -382,7 +388,6 @@ later.)&nbsp; Here are the most common options:</p>
 	<li>default task scheduler</li>
 </ul>
 	</li>
-	<li>AsParallel - a PLINQ (parallel LINQ) extension on an Enumerable</li>
 	<li>await - calling an asynchronous method with a continuation</li>
 	<li>QueueUserWorkItem&nbsp; - queues work</li>
 	<li>BackgroundWorker</li>
@@ -632,16 +637,16 @@ indicates that the thread is complete, and see what happens.</p>
   Task.WaitAll(tasks.ToArray());
 
     return tasks.Sum(t =&gt; t.Result);
-  }
+}
 
-  static async Task&lt;int&gt; DoWorkWithReturnAsyncAndContinuation(int threadNum)
+static async Task&lt;int&gt; DoWorkWithReturnAsyncAndContinuation(int threadNum)
+{
+  var t = await Task.Run(() =&gt; AwaitableBruteForceAlgorithm(threadNum));
+
+  lock (locker)
   {
-    var t = await Task.Run(() =&gt; AwaitableBruteForceAlgorithm(threadNum));
-
-    lock (locker)
-    {
-      Console.WriteLine(&quot;Thread number &quot; + threadNum + &quot; finished.&quot;);
-    }
+    Console.WriteLine(&quot;Thread number &quot; + threadNum + &quot; finished.&quot;);
+  }
 
   return t;
 }</pre>
@@ -687,7 +692,7 @@ start times.&nbsp; But what does the method return?&nbsp; It returns a <code>Tas
 and the return statement is <i>after</i> the continuation.&nbsp; It's <i>not 
 part of the continuation</i> which, when you think about it, can't return 
 anything anyways!&nbsp; Furthermore, <code>t</code>, when used <i>inside the 
-continuation</i> is the return (an int) of the method we're awaiting upon.&nbsp; 
+continuation</i> is the return (an <code>int</code>) of the method we're awaiting upon.&nbsp; 
 So if we wanted to output the count of primes: we would write:</p>
 <pre>Console.WriteLine(&quot;Count = &quot; + t);</pre>
 <p>and <i>not</i> <code>t.Result</code>.&nbsp; But in the caller that receives 
@@ -724,14 +729,14 @@ await Task.Run get next work item with return brute force and continuation:
 Number of primes is : 41538
 Total seconds = 13.4070216</pre>
 <h3>Using await in WinForm Applications</h3>
-<p>In the above console application, DurationOf is a thread blocking method, 
+<p>In the above console application, <code>DurationOf</code> is a thread blocking method, 
 waiting until all the tasks complete.&nbsp; This is completely unsuitable in a 
 WinForm application:</p>
 <ol>
 	<li>Blocking the main UI thread prevents the application's message pump from 
 	processed Windows messages.</li>
 	<li>Calls to <code>Invoke</code> for performing a UI update from a non-UI thread use the 
-	application's message pump to marshall the call onto the main UI thread.</li>
+	application's message pump to marshal the call onto the main UI thread.</li>
 	<li>When the main UI thread is blocked, messages aren't processed, and a 
 	deadlock occurs between the blocked UI thread and the thread requesting the 
 	<code>Invoke</code>.</li>
@@ -743,7 +748,7 @@ WinForm application:</p>
 	<li>The whole point is that it is desirable to use await and tasks <i>
 	without having to call Invoke or BeginInvoke.</i>&nbsp; </li>
 	<li>The await <i>should return control to the UI thread</i>.&nbsp; </li>
-	<li>The only time we would need to use Invoke or BeginInvoke is if we're 
+	<li>The only time we would need to use <code>Invoke</code> or <code>BeginInvoke</code> is if we're 
 	updating the UI in the non-UI thread, which ought to be avoided if possible.</li>
 	<li>And most importantly, the main UI thread should not be blocked!</li>
 </ol>
@@ -772,11 +777,12 @@ private async void OnFormShown(object sender, EventArgs e)
 (<code>TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation</code>) returns those 
 tasks.&nbsp; Then we wait until this tasks all complete with 
 <code>Task.WhenAll(tasks)</code>.&nbsp; We <i>await</i> this, which immediately exits out of 
-the <code>OnFormShown</code> method -- our UI thread is NOT blocked!&nbsp; Once 
+the <code>OnFormShown</code> method -- our UI thread is NOT blocked!&nbsp; Note 
+the difference between <code>Task.WhenAll</code> vs. <code>Task.WaitAll</code>!&nbsp; Once 
 the tasks complete, the <i>continuation</i> executes, summing the results of 
 each task and displaying the total number of primes found.&nbsp; Because the 
 synchronization context is a WinForm application, then continuation is itself 
-marshalled back onto the main UI thread, so when we append the line to tbOutput, 
+marshaled back onto the main UI thread, so when we append the line to <code>tbOutput</code>, 
 we don't need to do the marshalling ourselves with <code>Invoke</code> or <code>BeginInvoke</code>.</p>
 <h4>Creating Each Task</h4>
 <pre>protected List&lt;Task&lt;int&gt;&gt; TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation()
@@ -799,7 +805,7 @@ we don't need to do the marshalling ourselves with <code>Invoke</code> or <code>
 calls <code>DoWorkWithReturnAsyncAndContinuation</code>.&nbsp; The reason is so that the 
 await in <code>DoWorkWithReturnAsyncAndContinuation</code> returns to the caller, which is 
 the code shown above, so that the next thread can be created.&nbsp; We can't 
-even write the method with an embedded Task.Run():</p>
+even write the method with an embedded <code>Task.Run()</code>:</p>
 <p><img border="0" src="cantdo.png" width="798" height="247"></p>
 <p>And even if we could, the <code>await</code> would return immediately to the caller.&nbsp; 
 When the task completed, the continuation would execute the next iteration of 
@@ -824,7 +830,7 @@ gets around to creating the task:</p>
 continuation is executed on the &quot;captured context&quot; - the UI thread.&nbsp; This 
 is equivalent to adding <code>.ConfigureAwait(true)</code>.&nbsp; If we used 
 <code>.ConfigureAwait(false)</code>, the continuation may or may not execute on the captured 
-context thread, in which case the UI outputs would have to be marshalled with 
+context thread, in which case the UI outputs would have to be marshaled with 
 <code>Invoke</code> or <code>BeginInvoke</code>.&nbsp; It's also worth pointing 
 out that we don't need to <code>lock</code> the output to the UI to ensure that the lines are 
 written in the correct sequence.&nbsp; Because we're continuing on the captured 
@@ -832,6 +838,138 @@ context (the UI thread) and there's only ever one UI thread, we're guaranteed
 that all three <code>AppendLine</code> calls occur contiguously, regardless of whether 
 another task finishes in the meantime.&nbsp; That task's continuation will be 
 blocked until our continuation exits.</p>
+<h2>Semaphores and Queuing Work</h2>
+<p>A vital aspect of threads is how the thread picks up work.&nbsp; The above 
+examples all use a simple mechanism to get the next integer to test for &quot;primality&quot;:</p>
+<pre>while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)</pre>
+<p>In the real world, this is usually unrealistic.&nbsp; A thread usually is 
+instantiated:</p>
+<ol>
+	<li>To perform some task asynchronously and when the task is complete, the 
+	thread exists.</li>
+	<li>To wait for work to appear in a queue, which it then processes and after 
+	processing, goes back to sleep.</li>
+</ol>
+<p>The second form, waiting for work to appear, often involves using a semaphore 
+(from railroad signals<sup>9</sup>) to indicate that work is ready.&nbsp; The 
+complexity created here is terminating the thread when the application no longer 
+needs to the thread to do work.&nbsp; Semaphores can be used with &quot;old style&quot; 
+threads as well as the more modern techniques for creating threads.&nbsp; We'll 
+use semaphores with the <code>Task</code> class in the following examples.&nbsp; 
+These examples also introduce the <code>ConcurrentQueue</code> class found in the 
+<code>System.Collections.Concurrent</code> namespace.&nbsp; Here's the code:</p>
+<pre>static void UsingSemaphores()
+{
+  Semaphore sem = new Semaphore(0, Int32.MaxValue);
+  int numProcs = Environment.ProcessorCount;
+  var queue = new ConcurrentQueue&lt;int&gt;();
+  int numPrimes = 0;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    Task.Run(() =&gt;
+    {
+      while (true)
+      {
+        sem.WaitOne();
+
+        if (queue.TryDequeue(out int n))
+        {
+          if( IsPrime(n))
+          {
+            Interlocked.Increment(ref numPrimes);
+          }
+        }
+      }
+    });
+  }
+
+  DurationOf(() =&gt;
+  {
+    Enumerable.Range(2, MAX).ForEach(n =&gt;
+    {
+      queue.Enqueue(n);
+      sem.Release();
+    });
+
+    while (!queue.IsEmpty) Thread.Sleep(1);
+
+    return numPrimes;
+  }, &quot;Threads using semaphores&quot;);
+}</pre>
+<p>There are three sections to the above method.&nbsp; The reason I combined 
+them into a single method is for convenience of the closures.&nbsp; The first 
+section, instantiating the tasks, has two important lines:</p>
+<pre>...
+sem.WaitOne();
+
+if (queue.TryDequeue(out int n))
+...</pre>
+<p>Here, the thread is suspended until the semaphore signals that there is work 
+to be done.&nbsp; Once signaled, the work (in this case the next number to 
+process) is dequeued.&nbsp; In the <code>ConcurrentQueue</code>, <code>TryDequeue</code> is the only 
+dequeuing method available, which ensures that no other thread has removed the 
+queued item.&nbsp; With the semaphore, only one thread is released, so this is 
+not an issue here, but it would be an issue if there is no synchronization of 
+dequeuing work between threads.</p>
+<p>Next, the work is queued.&nbsp; One can release the semaphore one at a time, 
+or, after queuing the work, the semaphore can be given a release count.&nbsp; In 
+the example, I opted for the &quot;one at a time&quot; approach because I find it more 
+typical:</p>
+<pre>Enumerable.Range(2, MAX).ForEach(n =&gt;
+{
+  queue.Enqueue(n);
+  sem.Release();
+});</pre>
+<p>The third section waits for the queue to be empty -- this is wrong, but we 
+want to discuss why it's wrong, so this is a teaching example:</p>
+<pre>while (!queue.IsEmpty) Thread.Sleep(1);</pre>
+<p>IMP! One of the complexities of working with semaphores in threads (as opposed to 
+awaitable async methods) is that while you can easily enqueue the work for the 
+thread to pick up, you don't really know when the threads have finished their 
+work.&nbsp; For example:</p>
+<p><img border="0" src="sem1.png" width="608" height="130">&nbsp; </p>
+<p>Notice the second computation of the number of primes is short by 4.&nbsp; 
+This is because, while the queue is empty, indicating that all work has been 
+done, the threads hadn't actually finished processing!</p>
+<p>IMP! As mentioned earlier, another problem is telling the thread, which is 
+waiting for work, that it should terminate because the application doesn't need 
+it anymore.&nbsp; We can deal with both issues by enqueuing a 0 as a poor-man's 
+flag to indicate that the thread should terminate.&nbsp; But we have to do this 
+for the number of threads that we created!&nbsp; First, we keep track of the 
+tasks:</p>
+<pre>...
+List&lt;Task&gt; tasks = new List&lt;Task&gt;();
+
+for (int i = 0; i &lt; numProcs; i++)
+{
+  tasks.Add(Task.Run(() =&gt;
+  ...</pre>
+<p>Second, when a 0 is dequeued, the task exits:</p>
+<pre>...
+if (queue.TryDequeue(out int n))
+{
+  if (n == 0)
+  {
+    break;
+  }
+...</pre>
+<p>Third, we enqueue the work of &quot;0&quot; for each task and release the semaphore for that count 
+-- this works because the thread exits, so the each thread will receive exactly 
+1 &quot;0&quot; to indicate that it should terminate:</p>
+<pre>for (int i = 0; i &lt; numProcs; i++)
+{
+  queue.Enqueue(0);
+}
+
+sem.Release(numProcs);</pre>
+<p>Lastly, we wait until the threads complete:</p>
+<pre>Task.WaitAll(tasks.ToArray());</pre>
+<p><img border="0" src="sem2.png" width="228" height="48"></p>
+<p>Now we have successfully written a the code based on <i>when the work is done</i> 
+rather than when the queue is empty of work<i> to be done.</i>&nbsp; A very 
+important difference.&nbsp; Also note that we could have written very similar 
+code using pure threads and <code>Thread.Join</code>.</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
@@ -842,9 +980,10 @@ blocked until our continuation exits.</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
-<p>Semaphores and queuing work</p>
-<p>Task.Run</p>
-<p>async tasks</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
 <p>&quot;doing CPU work&quot;&nbsp; google it</p>
 <p>ThreadPool.QueueUserWorkItem / BackgroundWorker</p>
 <p>Working with the ThreadPool:
@@ -877,6 +1016,10 @@ https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/concepts/async/
 <p><sup>8</sup> -
 <a href="https://blogs.msdn.microsoft.com/pfxteam/2011/10/24/task-run-vs-task-factory-startnew/">
 https://blogs.msdn.microsoft.com/pfxteam/2011/10/24/task-run-vs-task-factory-startnew/</a> </p>
+<p><sup>9</sup> -
+<a href="https://en.wikipedia.org/wiki/Railway_semaphore_signal">
+https://en.wikipedia.org/wiki/Railway_semaphore_signal</a> </p>
+<p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>Calling the algorithm:</p>
 <p>The implementation:</p>

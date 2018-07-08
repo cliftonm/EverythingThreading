@@ -1,11 +1,23 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Primes
 {
+    public static class ExtensionMethods
+    {
+        public static void ForEach<T>(this IEnumerable<T> src, Action<T> action)
+        {
+            foreach (T item in src)
+            {
+                action(item);
+            }
+        }
+    }
+
     class Program
     {
         // Should find 41,538 primes for MAX 500,000
@@ -39,7 +51,7 @@ namespace Primes
             // DurationOf(TaskAwaitGetNextWorkItemBruteForceWithReturn, "await Task.Run get next work item with return brute force:");
             Console.WriteLine();
 
-            DurationOf(TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation, "await Task.Run get next work item with return brute force and continuation:");
+            // DurationOf(TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation, "await Task.Run get next work item with return brute force and continuation:");
             Console.WriteLine();
 
             // DurationOf(ThreadedGetNextWorkItemSieve, "Threaded get next work item sieve:");
@@ -48,6 +60,8 @@ namespace Primes
             // DurationOf(ThreadedGetNextWorkItemSieveShowPrimes, "Threaded get next work item sieve:");
             // notPrimes.Select((p, idx) => new { p, idx }).Where((item) => !item.p).ToList().ForEach(item => Console.WriteLine(item.idx));
             Console.WriteLine();
+
+            UsingSemaphores();
 
             Console.ReadLine();
         }
@@ -76,7 +90,7 @@ namespace Primes
         static int NumPrimes(int start, int end)
         {
             int numPrimes = 0;
-            for (int i = start; i < end; numPrimes += IsPrime(i++) ? 1 : 0);
+            for (int i = start; i < end; numPrimes += IsPrime(i++) ? 1 : 0) ;
             return numPrimes;
         }
 
@@ -389,8 +403,61 @@ namespace Primes
         static bool IsPrime(int n)
         {
             bool ret = true;
-            for (int i = 2; i <= n / 2 && ret; ret = n % i++ != 0);
+            for (int i = 2; i <= n / 2 && ret; ret = n % i++ != 0) ;
             return ret;
+        }
+
+        static void UsingSemaphores()
+        {
+            Semaphore sem = new Semaphore(0, Int32.MaxValue);
+            int numProcs = Environment.ProcessorCount;
+            var queue = new ConcurrentQueue<int>();
+            int numPrimes = 0;
+            List<Task> tasks = new List<Task>();
+
+            for (int i = 0; i < numProcs; i++)
+            {
+                tasks.Add(Task.Run(() =>
+                {
+                    while (true)
+                    {
+                        sem.WaitOne();
+
+                        if (queue.TryDequeue(out int n))
+                        {
+                            if (n == 0)
+                            {
+                                break;
+                            }
+
+                            if (IsPrime(n))
+                            {
+                                Interlocked.Increment(ref numPrimes);
+                            }
+                        }
+                    }
+                }));
+            }
+
+            DurationOf(() =>
+            {
+                Enumerable.Range(2, MAX).ForEach(n =>
+                {
+                    queue.Enqueue(n);
+                    sem.Release();
+                });
+
+                for (int i = 0; i < numProcs; i++)
+                {
+                    queue.Enqueue(0);
+                }
+
+                sem.Release(numProcs);
+
+                Task.WaitAll(tasks.ToArray());
+
+                return numPrimes;
+            }, "Threads using semaphores");
         }
     }
 }
