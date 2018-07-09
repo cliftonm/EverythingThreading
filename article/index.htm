@@ -9,8 +9,10 @@
 <body>
 
 <p>Everything Threading</p>
-<p>Various approaches to threading and discussing of locks, semaphores, 
-concurrent collections, work queues, and thread joining</p>
+<p>A discussion of various approaches to threading and discussing of locks, 
+mutexes, semaphores, 
+concurrent collections, work queues, threads, PLINQ, TPL, exception 
+handling, and cancellation tokens. </p>
 <h2>Introduction</h2>
 <p>I was recently asked to provide some training on how threads are used in C#.&nbsp; 
 What started off as simple (doesn't it always) turned into a detailed analysis 
@@ -921,9 +923,14 @@ typical:</p>
   queue.Enqueue(n);
   sem.Release();
 });</pre>
-<p>The third section waits for the queue to be empty -- this is wrong, but we 
+<p>The third section waits for the queue to be empty -- this is really bad 
+practice, but we 
 want to discuss why it's wrong, so this is a teaching example:</p>
 <pre>while (!queue.IsEmpty) Thread.Sleep(1);</pre>
+<p>Ideally, putting a thread to sleep while we spin waiting for something to 
+happen, is a really bad idea.&nbsp; Instead, completion of a task should be 
+signaled using a semaphore or a task &quot;wait&quot; call, but for now we'll use this 
+code.</p>
 <p>IMP! One of the complexities of working with semaphores in threads (as opposed to 
 awaitable async methods) is that while you can easily enqueue the work for the 
 thread to pick up, you don't really know when the threads have finished their 
@@ -970,17 +977,231 @@ sem.Release(numProcs);</pre>
 rather than when the queue is empty of work<i> to be done.</i>&nbsp; A very 
 important difference.&nbsp; Also note that we could have written very similar 
 code using pure threads and <code>Thread.Join</code>.</p>
-<h2>Mutex vs. Lock</h2>
-<p>It's also important to understand the difference between the Mutex class and 
-the lock statement.&nbsp; While a mutex might appear to be the same as a lock 
-statement, there are two important differences:</p>
+<h2>Mutexes, Locks, and Semaphores</h2>
+<p>It's also important to understand the difference between the <code>Mutex</code><sup>10</sup> class and 
+the lock statement.&nbsp; While a mutex (mutual-exclusion) might appear to be the same as a lock 
+statement, there are a couple important differences:</p>
 <ul>
 	<li>a mutex can have a timeout</li>
 	<li>a mutex can cross application boundaries</li>
 </ul>
-<p>The latter is particularly important if you are writing code for a device 
-driver and you need to ensure that only one thread, where that thread can 
-represent different applications, is accessing the device at a time.</p>
+<p>This differs from a <code>lock</code> statement which cannot cross application boundaries 
+and does not support a timeout.&nbsp; In contrast with a semaphore, a mutex enforces thread identity, meaning that 
+a mutex can only be released by the thread that acquired it.&nbsp; With a 
+semaphore, any thread can <code>Release</code> the semaphore for the current or a different 
+thread to be released from the <code>WaitOne</code> call and continue execution.&nbsp; 
+We can use a mutex instead of the lock statement here:</p>
+<pre>static void DurationOf(Func&lt;int&gt; action, string section)
+{
+  var start = DateTime.Now;
+  int numPrimes = action();
+  var stop = DateTime.Now;
+
+  lock (locker)
+  {
+    Console.WriteLine(section);
+    Console.WriteLine(&quot;Number of primes is : &quot; + numPrimes);
+    Console.WriteLine(&quot;Total seconds = &quot; + (stop - start).TotalSeconds);
+  }
+}</pre>
+<p>The change would look like this:</p>
+<pre>...
+static Mutex mutex = new Mutex();
+...
+static void DurationOf(Func&lt;int&gt; action, string section)
+{
+  var start = DateTime.Now;
+  int numPrimes = action();
+  var stop = DateTime.Now;
+
+  mutex.WaitOne();
+  Console.WriteLine(section);
+  Console.WriteLine(&quot;Number of primes is : &quot; + numPrimes);
+  Console.WriteLine(&quot;Total seconds = &quot; + (stop - start).TotalSeconds);
+  mutex.ReleaseMutex();
+}</pre>
+<p>Mutexes are used to ensure the <i>mutual exclusion</i> of the same code, 
+whereas a semaphore is typically used to wait for work and to process work <i>
+simultaneously</i> by the same code in different threads.&nbsp; Also, as you can 
+see from the above code, which demonstrates a very simple mutual exclusion, a 
+<code>lock</code> statement is superior because it doesn't require instantiating a global 
+mutex.</p>
+<h2>Exception Handling</h2>
+<p>While I'd love to claim that my threads never throw exceptions, the reality 
+is that exception handling has to be dealt with.&nbsp; </p>
+<h3>Exceptions Handling and the Thread Class</h3>
+<p>For giggles, let's change the brute force method to throw an exception if the 
+number is prime!</p>
+<pre>static void NextWorkItemBruteForceThreadThrowsException(object parms)
+{
+  int threadNum = (int)parms;
+  DurationOf(() =&gt;
+  {
+    int n;
+
+    while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)
+    {
+      if (IsPrime(n))
+      {
+        throw new Exception(&quot;Number is prime: &quot; + n);
+      }
+    }
+
+    return 0;
+  }, $&quot;Thread: {threadNum}&quot;);
+}</pre>
+<p>Running this in our console tests, we get this ugly mess:</p>
+<p><img border="0" src="ex1.png" width="698" height="512"></p>
+<p>What we want to do though is provide a way to handle the exception more 
+gracefully.&nbsp; Implementing UnhandledException:</p>
+<pre>Thread.GetDomain().UnhandledException += (sndr, exargs) =&gt;
+{
+  Console.WriteLine(&quot;Thread: &quot; + (exargs.ExceptionObject as Exception)?.Message);
+};
+
+AppDomain.CurrentDomain.UnhandledException += (sndr, exargs) =&gt;
+{
+  Console.WriteLine(&quot;AppDomain: &quot; + (exargs.ExceptionObject as Exception)?.Message);
+};</pre>
+<p>isn't really what we want because the console still logs the entire stack 
+trace and more importantly, the uncaught exception in the thread will terminate 
+the application, which probably isn't what we want to happen.&nbsp; A better 
+solution is the wrap the thread method in a try-catch block and provide an 
+exception handler:</p>
+<pre>static void SafeThread(Action action)
+{
+  try
+  {
+    action();
+  }
+  catch (Exception ex)
+  {
+    Console.WriteLine(&quot;Exception: &quot; + ex.Message);
+  }
+}
+
+static void ThreadExceptionExample()
+{
+  List&lt;(Thread thread, int threadNum)&gt; threads = new List&lt;(Thread thread, int threadNum)&gt;();
+  int numProcs = Environment.ProcessorCount;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    // We changed the signature of NextWorkItemBruteForceThreadThrowsException slightly:
+    // And we're no longer using a parameterized thread start because we have closure on i.
+    var thread = new Thread(new ThreadStart(() =&gt; SafeThread(() =&gt; NextWorkItemBruteForceThreadThrowsException(i))));
+    thread.IsBackground = true;
+    threads.Add((thread, i));
+  }
+
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  threads.ForEach(t =&gt; t.thread.Start());
+  threads.ForEach(t =&gt; t.thread.Join());
+}</pre>
+<p>Now we get:</p>
+<p><img border="0" src="ex2.png" width="298" height="134"></p>
+<p>Notice that the console application also doesn't abruptly terminate.&nbsp; </p>
+<h3>Exception Handling with Task</h3>
+<p>Here's the code that sets up running tasks that throws an exception when the 
+number is prime:</p>
+<pre>static int TaskAwaitGetNextWorkItemBruteForceThrowsException()
+{
+  int numProcs = Environment.ProcessorCount;
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  List&lt;Task&gt; tasks = new List&lt;Task&gt;();
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var task = DoWorkAsyncThrowsException(i);
+    tasks.Add(task);
+  }
+
+  Task.WaitAll(tasks.ToArray());
+
+  return totalNumPrimes;
+}
+
+static async Task DoWorkAsyncThrowsException(int threadNum)
+{
+  await Task.Run(() =&gt; NextWorkItemBruteForceThreadThrowsException(threadNum));
+}</pre>
+<p>This results in the usual ugly console log and the console application 
+terminates:</p>
+<p><img border="0" src="ex3.png" width="638" height="524"></p>
+<p>If we do this however:</p>
+<pre>static async Task DoWorkAsyncThrowsException(int threadNum)
+{
+  try
+  {
+     await Task.Run(() =&gt; NextWorkItemBruteForceThreadThrowsException(threadNum));
+  }
+  catch (Exception ex)
+  {
+    Console.WriteLine(ex.Message);
+  }
+}</pre>
+<p>We can now handle the exception and the application doesn't terminate:</p>
+<p><img border="0" src="ex4.png" width="265" height="161"></p>
+<p>If you use the one of the <code>Task.Wait</code> methods, the exception being thrown by 
+the awaited task is actually very sophisticated.&nbsp; Read more about it here &quot;<a href="https://docs.microsoft.com/en-us/dotnet/standard/parallel-programming/exception-handling-task-parallel-library">Exception 
+Handling (Task Parallel Library)</a>&quot;.&nbsp; Changing our example slightly:</p>
+<pre>static int TaskAwaitGetNextWorkItemBruteForceThrowsException()
+{
+  int numProcs = Environment.ProcessorCount;
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  List&lt;Task&gt; tasks = new List&lt;Task&gt;();
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var task = DoWorkAsyncThrowsException(i);
+    tasks.Add(task);
+  }
+
+  try
+  {
+    Task.WaitAll(tasks.ToArray());
+  }
+  catch (AggregateException ex)
+  {
+    Console.WriteLine(ex.Message);
+
+    tasks.ForEachWithIndex((t, i) =&gt;
+    {
+      Console.WriteLine(&quot;Task &quot; + i);
+      Console.WriteLine(&quot;Is canceled: &quot; + t.IsCanceled);
+      Console.WriteLine(&quot;Is completed: &quot; + t.IsCompleted);
+      Console.WriteLine(&quot;Is faulted: &quot; + t.IsFaulted);
+    });
+  }
+
+  return totalNumPrimes;
+}
+
+static async Task DoWorkAsyncThrowsException(int threadNum)
+{
+  await Task.Run(() =&gt; NextWorkItemBruteForceThreadThrowsException(threadNum));
+}</pre>
+<p>Notice the output now, after moving the try-catch block to the <code>Wait</code> call:</p>
+<p><img border="0" src="ex5.png" width="269" height="354"></p>
+<p>&nbsp;</p>
+<pre>&nbsp;</pre>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>
+<a href="https://stackoverflow.com/questions/5983779/catch-exception-that-is-thrown-in-different-thread#">https://stackoverflow.com/questions/5983779/catch-exception-that-is-thrown-in-different-thread#</a></p>
+<p>
+<a href="https://social.msdn.microsoft.com/Forums/vstudio/en-US/c95ba61b-78d3-462f-b09f-cd0571ffd22d/how-do-you-catch-exceptions-in-threaded-console-application?forum=csharpgeneral">
+https://social.msdn.microsoft.com/Forums/vstudio/en-US/c95ba61b-78d3-462f-b09f-cd0571ffd22d/how-do-you-catch-exceptions-in-threaded-console-application?forum=csharpgeneral</a></p>
+<p>&nbsp;</p>
+<p>&nbsp; </p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
@@ -990,11 +1211,9 @@ represent different applications, is accessing the device at a time.</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
+<p>Task.Start vs. Task.Run</p>
+<p>TaskCreationOptions.LongRunnning</p>
+<p>STA vs. MTA</p>
 <p>&quot;doing CPU work&quot;&nbsp; google it</p>
 <p>ThreadPool.QueueUserWorkItem / BackgroundWorker</p>
 <p>Working with the ThreadPool:
@@ -1030,7 +1249,9 @@ https://blogs.msdn.microsoft.com/pfxteam/2011/10/24/task-run-vs-task-factory-sta
 <p><sup>9</sup> -
 <a href="https://en.wikipedia.org/wiki/Railway_semaphore_signal">
 https://en.wikipedia.org/wiki/Railway_semaphore_signal</a> </p>
-<p>&nbsp;</p>
+<p><sup>10</sup> -
+<a href="https://msdn.microsoft.com/en-us/library/system.threading.mutex(v=vs.110).aspx">
+https://msdn.microsoft.com/en-us/library/system.threading.mutex(v=vs.110).aspx</a> </p>
 <p>&nbsp;</p>
 <p>Calling the algorithm:</p>
 <p>The implementation:</p>

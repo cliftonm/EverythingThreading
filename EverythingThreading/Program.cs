@@ -1,4 +1,6 @@
-﻿using System;
+﻿#define USE_LOCK
+
+using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Linq;
@@ -16,6 +18,16 @@ namespace Primes
                 action(item);
             }
         }
+
+        public static void ForEachWithIndex<T>(this List<T> src, Action<T, int> action)
+        {
+            int n = src.Count;
+
+            for (int i = 0; i < n; i++)
+            {
+                action(src[i], i);
+            }
+        }
     }
 
     class Program
@@ -27,9 +39,20 @@ namespace Primes
         static int nextNumber = 1;
         static bool[] notPrimes;
         static object locker = new object();
+        static Mutex mutex = new Mutex();
 
         static void Main(string[] args)
         {
+            Thread.GetDomain().UnhandledException += (sndr, exargs) =>
+            {
+                Console.WriteLine("Thread: " + (exargs.ExceptionObject as Exception)?.Message);
+            };
+
+            AppDomain.CurrentDomain.UnhandledException += (sndr, exargs) =>
+            {
+                Console.WriteLine("AppDomain: " + (exargs.ExceptionObject as Exception)?.Message);
+            };
+
             // DurationOf(BruteForce, "Brute force:");
             Console.WriteLine();
 
@@ -61,11 +84,17 @@ namespace Primes
             // notPrimes.Select((p, idx) => new { p, idx }).Where((item) => !item.p).ToList().ForEach(item => Console.WriteLine(item.idx));
             Console.WriteLine();
 
-            UsingSemaphores();
+            // UsingSemaphores();
+
+            // ThreadExceptionExample();
+            TaskAwaitGetNextWorkItemBruteForceThrowsException();
+
+            Console.WriteLine("Waiting for ENTER...");
 
             Console.ReadLine();
         }
 
+#if USE_LOCK
         static void DurationOf(Func<int> action, string section)
         {
             var start = DateTime.Now;
@@ -79,6 +108,20 @@ namespace Primes
                 Console.WriteLine("Total seconds = " + (stop - start).TotalSeconds);
             }
         }
+#else
+        static void DurationOf(Func<int> action, string section)
+        {
+            var start = DateTime.Now;
+            int numPrimes = action();
+            var stop = DateTime.Now;
+
+            mutex.WaitOne();
+            Console.WriteLine(section);
+            Console.WriteLine("Number of primes is : " + numPrimes);
+            Console.WriteLine("Total seconds = " + (stop - start).TotalSeconds);
+            mutex.ReleaseMutex();
+        }
+#endif
 
         static int BruteForce()
         {
@@ -407,6 +450,8 @@ namespace Primes
             return ret;
         }
 
+        // ======================================
+
         static void UsingSemaphores()
         {
             Semaphore sem = new Semaphore(0, Int32.MaxValue);
@@ -458,6 +503,99 @@ namespace Primes
 
                 return numPrimes;
             }, "Threads using semaphores");
+        }
+
+        // ======================================
+
+        /// <summary>
+        /// Here we throw an exception when the number is prime!
+        /// </summary>
+        static void NextWorkItemBruteForceThreadThrowsException(int threadNum)
+        {
+            DurationOf(() =>
+            {
+                int n;
+
+                while ((n = Interlocked.Increment(ref nextNumber)) < MAX)
+                {
+                    if (IsPrime(n))
+                    {
+                        throw new Exception("Number is prime: " + n);
+                    }
+                }
+
+                return 0;
+            }, $"Thread: {threadNum}");
+        }
+
+        static void SafeThread(Action action)
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Exception: " + ex.Message);
+            }
+        }
+
+        static void ThreadExceptionExample()
+        {
+            List<(Thread thread, int threadNum)> threads = new List<(Thread thread, int threadNum)>();
+            int numProcs = Environment.ProcessorCount;
+
+            for (int i = 0; i < numProcs; i++)
+            {
+                var thread = new Thread(new ThreadStart(() => SafeThread(() => NextWorkItemBruteForceThreadThrowsException(i))));
+                thread.IsBackground = true;
+                threads.Add((thread, i));
+            }
+
+            totalNumPrimes = 0;
+            nextNumber = 1;
+            threads.ForEach(t => t.thread.Start());
+            threads.ForEach(t => t.thread.Join());
+        }
+
+        // ======================================
+
+        static int TaskAwaitGetNextWorkItemBruteForceThrowsException()
+        {
+            int numProcs = Environment.ProcessorCount;
+            totalNumPrimes = 0;
+            nextNumber = 1;
+            List<Task> tasks = new List<Task>();
+
+            for (int i = 0; i < numProcs; i++)
+            {
+                var task = DoWorkAsyncThrowsException(i);
+                tasks.Add(task);
+            }
+
+            try
+            {
+                Task.WaitAll(tasks.ToArray());
+            }
+            catch (AggregateException ex)
+            {
+                Console.WriteLine(ex.Message);
+
+                tasks.ForEachWithIndex((t, i) =>
+                {
+                    Console.WriteLine("Task " + i);
+                    Console.WriteLine("Is canceled: " + t.IsCanceled);
+                    Console.WriteLine("Is completed: " + t.IsCompleted);
+                    Console.WriteLine("Is faulted: " + t.IsFaulted);
+                });
+            }
+
+            return totalNumPrimes;
+        }
+
+        static async Task DoWorkAsyncThrowsException(int threadNum)
+        {
+            await Task.Run(() => NextWorkItemBruteForceThreadThrowsException(threadNum));
         }
     }
 }
