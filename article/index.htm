@@ -970,6 +970,17 @@ sem.Release(numProcs);</pre>
 rather than when the queue is empty of work<i> to be done.</i>&nbsp; A very 
 important difference.&nbsp; Also note that we could have written very similar 
 code using pure threads and <code>Thread.Join</code>.</p>
+<h2>Mutex vs. Lock</h2>
+<p>It's also important to understand the difference between the Mutex class and 
+the lock statement.&nbsp; While a mutex might appear to be the same as a lock 
+statement, there are two important differences:</p>
+<ul>
+	<li>a mutex can have a timeout</li>
+	<li>a mutex can cross application boundaries</li>
+</ul>
+<p>The latter is particularly important if you are writing code for a device 
+driver and you need to ensure that only one thread, where that thread can 
+represent different applications, is accessing the device at a time.</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
