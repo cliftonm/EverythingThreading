@@ -87,7 +87,9 @@ namespace Primes
             // UsingSemaphores();
 
             // ThreadExceptionExample();
-            TaskAwaitGetNextWorkItemBruteForceThrowsException();
+            // TaskAwaitGetNextWorkItemBruteForceThrowsException();
+
+            DurationOf(HybridAwaitableThread, "Hybrid awaitable thread:");
 
             Console.WriteLine("Waiting for ENTER...");
 
@@ -596,6 +598,51 @@ namespace Primes
         static async Task DoWorkAsyncThrowsException(int threadNum)
         {
             await Task.Run(() => NextWorkItemBruteForceThreadThrowsException(threadNum));
+        }
+
+        // ===============================================
+
+        static void HybridThread(object parms)
+        {
+            (int threadNum, TaskCompletionSource<int> tcs) parm = (ValueTuple<int, TaskCompletionSource<int>>)parms;
+
+            DurationOf(() =>
+            {
+                int numPrimes = 0;
+                int n;
+
+                while ((n = Interlocked.Increment(ref nextNumber)) < MAX)
+                {
+                    if (IsPrime(n))
+                    {
+                        ++numPrimes;
+                    }
+                }
+
+                parm.tcs.SetResult(numPrimes);
+                return numPrimes;
+            }, $"Thread: {parm.threadNum}");
+        }
+
+        static int HybridAwaitableThread()
+        {
+            List<(Thread thread, int threadNum)> threads = new List<(Thread thread, int threadNum)>();
+            List<TaskCompletionSource<int>> tasks = new List<TaskCompletionSource<int>>();
+            int numProcs = Environment.ProcessorCount;
+
+            for (int i = 0; i < numProcs; i++)
+            {
+                var thread = new Thread(new ParameterizedThreadStart(HybridThread));
+                thread.IsBackground = true;
+                threads.Add((thread, i));
+                tasks.Add(new TaskCompletionSource<int>());
+            }
+
+            nextNumber = 1;
+            threads.ForEachWithIndex((t, idx) => t.thread.Start((t.threadNum, tasks[idx])));
+            Task.WaitAll(tasks.Select(t=>t.Task).ToArray());
+
+            return tasks.Sum(t=>t.Task.Result);
         }
     }
 }

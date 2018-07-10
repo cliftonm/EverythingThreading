@@ -1186,7 +1186,68 @@ static async Task DoWorkAsyncThrowsException(int threadNum)
 }</pre>
 <p>Notice the output now, after moving the try-catch block to the <code>Wait</code> call:</p>
 <p><img border="0" src="ex5.png" width="269" height="354"></p>
-<h2>Canceling Threads and Tasks</h2>
+<h2>Awaitable Threads - A Hybrid Approach using TaskCompletionSource</h2>
+<p><img border="0" src="hybrid1.png" width="263" height="327"></p>
+<p>What if you want to use threads that you create yourself rather than being 
+married to the thread pool, but you still want to take advantage of the ability 
+to await on the thread?&nbsp; This is accomplished using the 
+<code>TaskCompletionSource</code> class.&nbsp; This class wraps a <code>Task</code> instance 
+that you can use exactly as if the task had been created using <code>Task.Run</code> or 
+similar task creation methods.&nbsp; In the following example, we set up a 
+<code>TaskCompletionSource</code> for each thread and pass the <code>TaskCompletionSource</code> instance 
+to that thread:</p>
+<pre>static int HybridAwaitableThread()
+{
+  List&lt;(Thread thread, int threadNum)&gt; threads = new List&lt;(Thread thread, int threadNum)&gt;();
+  List&lt;TaskCompletionSource&lt;int&gt;&gt; tasks = new List&lt;TaskCompletionSource&lt;int&gt;&gt;();
+  int numProcs = Environment.ProcessorCount;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var thread = new Thread(new ParameterizedThreadStart(HybridThread));
+    thread.IsBackground = true;
+    threads.Add((thread, i));
+    tasks.Add(new TaskCompletionSource&lt;int&gt;());
+  }
+
+  nextNumber = 1;
+  threads.ForEachWithIndex((t, idx) =&gt; t.thread.Start((t.threadNum, tasks[idx])));
+  Task.WaitAll(tasks.Select(t=&gt;t.Task).ToArray());
+
+  return tasks.Sum(t=&gt;t.Task.Result);
+}</pre>
+<p>Now, while the above code is using the blocking <code>Task.WaitAll</code> for timing 
+purposes, it would be perfectly valid in a different scenario (for example, a 
+Windows app) to also call await 
+<code>Task.WhenAll(tasks.Select(t=&gt;t.Task))</code> so that awaiting for the threads to 
+complete isn't blocking.</p>
+<p>Notice that this line:</p>
+<pre>threads.ForEachWithIndex((t, idx) =&gt; t.thread.Start((t.threadNum, tasks[idx])));</pre>
+<p>passes in a tuple including the <code>TaskCompletionSource</code> instance.&nbsp; In the thread 
+implementation, we use <code>SetResult</code> when the thread is complete, &quot;signaling&quot; that 
+the task is done:</p>
+<pre>static void HybridThread(object parms)
+{
+  (int threadNum, TaskCompletionSource&lt;int&gt; tcs) parm = (ValueTuple&lt;int, TaskCompletionSource&lt;int&gt;&gt;)parms;
+
+  DurationOf(() =&gt;
+  {
+    int numPrimes = 0;
+    int n;
+
+    while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)
+    {
+      if (IsPrime(n))
+      {
+        ++numPrimes;
+      }
+    }
+
+    parm.tcs.SetResult(numPrimes);
+    return numPrimes;
+  }, $&quot;Thread: {parm.threadNum}&quot;);
+}</pre>
+<p>The salient line here is <code>parm.tcs.SetResult(numPrimes);</code> which completes the task.<h2>Canceling Threads and Tasks</h2>
 <p>&nbsp;</p>
 <pre>&nbsp;</pre>
 <p>&nbsp;</p>
