@@ -1186,6 +1186,78 @@ static async Task DoWorkAsyncThrowsException(int threadNum)
 }</pre>
 <p>Notice the output now, after moving the try-catch block to the <code>Wait</code> call:</p>
 <p><img border="0" src="ex5.png" width="269" height="354"></p>
+<h3>Do NOT use async void!</h3>
+<p>Methods declared as &quot;async void&quot; do not have a <code>Task</code> object -- exceptions 
+thrown in the &quot;task&quot; will be raised directly on the <code>SynchronizationContext</code>.&nbsp; 
+In a console app, that means we can't catch the exception, instead it's handled 
+by the <code>AppDomain.CurrentDomain.UnhandledException</code>.&nbsp; Here's an example:</p>
+<pre>static async void ThrowExceptionAsync()
+{
+  await Task.Run(() =&gt; NextWorkItemBruteForceThreadThrowsException(0));
+}
+
+static void AsyncVoidExceptionTest()
+{
+  try
+  {
+    ThrowExceptionAsync();
+  }
+  catch (Exception ex)
+  {
+    Console.WriteLine(&quot;AsyncVoidExceptionTest: &quot; + ex.Message);
+  }
+}</pre>
+<p>Notice the output:</p>
+<p><img border="0" src="ex6.png" width="600" height="254"></p>
+<p>The task exception was handled by the <code>AppDomain</code> handler!&nbsp; 
+Contrast the exception handling with this code:</p>
+<pre>static async Task&lt;int&gt; ThrowExceptionAsync()
+{
+  await Task.Run(() =&gt; NextWorkItemBruteForceThreadThrowsException(0));
+
+  return 0;
+}
+
+static async Task&lt;int&gt; AsyncVoidExceptionTest()
+{
+  try
+  {
+    await ThrowExceptionAsync();
+  }
+  catch (Exception ex)
+  {
+    Console.WriteLine(&quot;AsyncVoidExceptionTest: &quot; + ex.Message);
+  }
+
+  return 0;
+}</pre>
+<p>and the output:</p>
+<p><img border="0" src="ex7.png" width="377" height="108"></p>
+<p>Here the exception is being handled by our outer await.&nbsp; What throws (no 
+pun intended) everyone for a loop is that when a method is declared as a 
+non-void async method, it must be awaited upon:</p>
+<p><img border="0" src="ex8.png" width="1045" height="200"></p>
+<p>But awaiting on a task means the method has to return a <code>Task</code> or be declared 
+as <code>async void</code>, which is exactly what we're trying to NOT do!&nbsp; 
+This can result in a cascade of refactoring parent methods to await and have the 
+signature of <code>async Task&lt;T&gt;</code>, all the way up to <code>Main</code>, which now can be declared as 
+<code>async void</code>!&nbsp; If you find yourself doing this, you're doing 
+something wrong with the structure of your async methods.&nbsp; In the test case 
+presented here, I stopped the cascade by calling, in Main:</p>
+<pre>Task.Run(() =&gt; AsyncVoidExceptionTest());</pre>
+<p>Conversely, we could do this:</p>
+<pre>static async Task&lt;int&gt; Main(string[] args)
+{
+  await AsyncVoidExceptionTest();
+  return 0;
+}</pre>
+<p>but not this:</p>
+<pre>static async void Main(string[] args)</pre>
+<p>which results in a compiler error: &quot;error CS4009: A void or int returning entry point cannot be async&quot;</p>
+<p>The point being, avoid (no pun intended again) <code>async void</code>, but really look 
+carefully at how your async tasks are being called so you don't end up 
+refactoring every method signature in the call hierarchy, all the way up to 
+<code>Main</code>!</p>
 <h2>Awaitable Threads - A Hybrid Approach using TaskCompletionSource</h2>
 <p><img border="0" src="hybrid1.png" width="263" height="327"></p>
 <p>What if you want to use threads that you create yourself rather than being 

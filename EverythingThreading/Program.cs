@@ -41,7 +41,7 @@ namespace Primes
         static object locker = new object();
         static Mutex mutex = new Mutex();
 
-        static void Main(string[] args)
+        static async Task<int> Main(string[] args)
         {
             Thread.GetDomain().UnhandledException += (sndr, exargs) =>
             {
@@ -89,11 +89,15 @@ namespace Primes
             // ThreadExceptionExample();
             // TaskAwaitGetNextWorkItemBruteForceThrowsException();
 
-            DurationOf(HybridAwaitableThread, "Hybrid awaitable thread:");
+            // DurationOf(HybridAwaitableThread, "Hybrid awaitable thread:");
+
+            await AsyncVoidExceptionTest();
 
             Console.WriteLine("Waiting for ENTER...");
 
             Console.ReadLine();
+
+            return 0;
         }
 
 #if USE_LOCK
@@ -643,6 +647,64 @@ namespace Primes
             Task.WaitAll(tasks.Select(t=>t.Task).ToArray());
 
             return tasks.Sum(t=>t.Task.Result);
+        }
+
+        // ===============================================
+
+        //static async void ThrowExceptionAsync()
+        //{
+        //    try
+        //    {
+        //        await Task.Run(() => NextWorkItemBruteForceThreadThrowsException(0));
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Console.WriteLine("void ThrowExceptionAsync: " + ex.Message);
+        //    }
+        //}
+
+        // Exception handled by AppDomain handler:
+
+        /*
+        static async void ThrowExceptionAsync()
+        {
+            await Task.Run(() => NextWorkItemBruteForceThreadThrowsException(0));
+        }
+
+        static void AsyncVoidExceptionTest()
+        {
+            try
+            {
+                ThrowExceptionAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("AsyncVoidExceptionTest: " + ex.Message);
+            }
+        }
+        */
+
+        // Exception handled by us:
+
+        static async Task<int> ThrowExceptionAsync()
+        {
+            await Task.Run(() => NextWorkItemBruteForceThreadThrowsException(0));
+
+            return 0;
+        }
+
+        static async Task<int> AsyncVoidExceptionTest()
+        {
+            try
+            {
+                await ThrowExceptionAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("AsyncVoidExceptionTest: " + ex.Message);
+            }
+
+            return 0;
         }
     }
 }
