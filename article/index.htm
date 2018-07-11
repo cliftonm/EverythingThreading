@@ -23,8 +23,30 @@ before in one article.</p>
 <h3>What Is a Thread?</h3>
 <p>I suppose I should start with a brief description of what a thread is, 
 although quite frankly, I'm assuming you actually know what a thread is.&nbsp; 
-But for the sake of completeness:</p>
-<p>&nbsp;</p>
+But, if someone asked you &quot;what is a thread?&quot; would you be able to provide a 
+concise and correct definition?&nbsp; Wikipedia<sup>11</sup> defines a thread 
+as: &quot;...a thread of execution is the smallest sequence of programmed 
+instructions that can be managed independently by a scheduler, which is 
+typically a part of the operating system.&quot;</p>
+<p>So, firstly, the term &quot;thread&quot; is actually shorthand for &quot;thread of 
+execution.&quot;&nbsp; Secondly, it incorporates the concept of a scheduler that 
+switches between &quot;sequences of programmed instructions.&quot;&nbsp; This sample 
+chapter<sup>12</sup> of <i>Windows Internals, 5th Edition</i>,&nbsp; is a highly 
+technical description of the scheduler in Windows (note this sample chapter was 
+written in 2009, the book <i>Windows Internals</i> is now on the 7th edition.)</p>
+<h4>What is a Fiber?</h4>
+<p>Again, according to Wikipedia<sup>13</sup>: &quot;...fibers use cooperative 
+multitasking while threads use preemptive multitasking.&quot;</p>
+<h4>Cooperative Multitasking vs. Preemptive Multitasking</h4>
+<p>Cooperative Multitasking: &quot;is a style of computer multitasking in which the 
+operating system never initiates a context switch from a running process to 
+another process. Instead, processes voluntarily yield control periodically or 
+when idle or logically blocked in order to enable multiple applications to be 
+run concurrently.&quot;<sup>14</sup> </p>
+<p>Preemptive Multitasking: &quot;...involves the use of an interrupt mechanism which 
+suspends the currently executing process and invokes a scheduler to determine 
+which process should execute next. Therefore, all processes will get some amount 
+of CPU time at any given time.&quot;<sup>15</sup></p>
 <h3>Coming Up With a Good Thread Example</h3>
 <p>The first problem of course is coming up with a good example where the work 
 is capable of being broken up into isolated chunks and that takes a reasonable 
@@ -1337,17 +1359,13 @@ https://social.msdn.microsoft.com/Forums/vstudio/en-US/c95ba61b-78d3-462f-b09f-c
 <p>
 Async void and exceptions:<a href="https://msdn.microsoft.com/en-us/magazine/jj991977.aspx"> 
 https://msdn.microsoft.com/en-us/magazine/jj991977.aspx</a></p>
-<p>&nbsp;</p>
-<p>&nbsp; </p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
+<p>Thread vs. Fiber</p>
+<p>LongRunning:
+<a href="http://blog.i3arnon.com/2015/07/02/task-run-long-running/">
+http://blog.i3arnon.com/2015/07/02/task-run-long-running/</a></p>
+<p>ThreadPool</p>
+<p>Write a Cooperative Multitasking (as opposed to a preemptive multitasking)</p>
+<p>ContinueWith</p>
 <p>Task.Start vs. Task.Run</p>
 <p>TaskCreationOptions.LongRunnning</p>
 <p>STA vs. MTA</p>
@@ -1389,6 +1407,18 @@ https://en.wikipedia.org/wiki/Railway_semaphore_signal</a> </p>
 <p><sup>10</sup> -
 <a href="https://msdn.microsoft.com/en-us/library/system.threading.mutex(v=vs.110).aspx">
 https://msdn.microsoft.com/en-us/library/system.threading.mutex(v=vs.110).aspx</a> </p>
+<p><sup>11</sup> - https://en.wikipedia.org/wiki/Thread_(computing) </p>
+<p><sup>12</sup> -
+<a href="https://www.microsoftpressstore.com/articles/article.aspx?p=2233328&seqNum=7">
+https://www.microsoftpressstore.com/articles/article.aspx?p=2233328&amp;seqNum=7</a></p>
+<p><sup>13</sup> - https://en.wikipedia.org/wiki/Fiber_(computer_science) </p>
+<p><sup>14</sup> -
+<a href="https://en.wikipedia.org/wiki/Cooperative_multitasking">
+https://en.wikipedia.org/wiki/Cooperative_multitasking</a></p>
+<p><sup>15</sup> -
+<a href="https://en.wikipedia.org/wiki/Preemption_(computing)#PREEMPTIVE">
+https://en.wikipedia.org/wiki/Preemption_(computing)#PREEMPTIVE</a></p>
+<p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>Calling the algorithm:</p>
 <p>The implementation:</p>
