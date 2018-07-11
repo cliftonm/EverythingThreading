@@ -12,19 +12,58 @@ namespace CooperativeThreading
     {
         protected Queue<Action> fibers = new Queue<Action>();
 
+        public void Add(Action work)
+        {
+            fibers.Enqueue(work);
+        }
+
         public void Continue(Action next)
         {
+            fibers.Enqueue(next);
+            var nextFiber = fibers.Dequeue();
+            nextFiber();
+        }
+
+        public void Run()
+        {
+            while (fibers.Count > 0)
+            {
+                var fiber = fibers.Dequeue();
+                fiber();
+            }
         }
     }
 
-    public class CoopTask1
+    public abstract class CMBase
     {
-        public void DoWork(CooperativeManager cm)
+        public CooperativeManager CooperativeManager { get; protected set; }
+
+        public CMBase(CooperativeManager cm)
         {
-            Thread.Sleep(1000);
-            cm.Continue(() => Thread.Sleep(1000));
-            cm.Continue(() => Thread.Sleep(1000));
-            cm.Continue(() => Thread.Sleep(1000));
+            CooperativeManager = cm;
+        }
+    }
+
+    public class CoopTasks : CMBase
+    {
+        public CoopTasks(CooperativeManager cm) : base(cm) { }
+
+        public void DoWork1()
+        {
+            Console.WriteLine("1 - 0");
+            CooperativeManager.Continue(() => Console.WriteLine("1 - 1"));
+            CooperativeManager.Continue(() => Console.WriteLine("1 - 2"));
+            CooperativeManager.Continue(() => Console.WriteLine("1 - 3"));
+            CooperativeManager.Continue(() => Console.WriteLine("1 - 4"));
+        }
+
+        public void DoWork2()
+        {
+            Console.WriteLine("2 - 0");
+            CooperativeManager.Continue(() => Console.WriteLine("2 - 1"));
+            CooperativeManager.Continue(() => Console.WriteLine("2 - 2"));
+            CooperativeManager.Continue(() => Console.WriteLine("2 - 3"));
+            CooperativeManager.Continue(() => Console.WriteLine("2 - 4"));
         }
     }
 
@@ -32,7 +71,11 @@ namespace CooperativeThreading
     {
         static void Main(string[] args)
         {
-
+            CooperativeManager cm = new CooperativeManager();
+            CoopTasks tasks = new CoopTasks(cm);
+            cm.Add(tasks.DoWork1);
+            cm.Add(tasks.DoWork2);
+            cm.Run();
         }
     }
 }
