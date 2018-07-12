@@ -47,6 +47,12 @@ run concurrently.&quot;<sup>14</sup> </p>
 suspends the currently executing process and invokes a scheduler to determine 
 which process should execute next. Therefore, all processes will get some amount 
 of CPU time at any given time.&quot;<sup>15</sup></p>
+<h3>CPU Bound Threads vs. I/O Bound Threads</h3>
+<p>[todo]</p>
+<p>
+<a href="https://stackoverflow.com/questions/868568/what-do-the-terms-cpu-bound-and-i-o-bound-mean">
+https://stackoverflow.com/questions/868568/what-do-the-terms-cpu-bound-and-i-o-bound-mean</a>
+</p>
 <h3>Coming Up With a Good Thread Example</h3>
 <p>The first problem of course is coming up with a good example where the work 
 is capable of being broken up into isolated chunks and that takes a reasonable 
@@ -1342,13 +1348,55 @@ the task is done:</p>
   }, $&quot;Thread: {parm.threadNum}&quot;);
 }</pre>
 <p>The salient line here is <code>parm.tcs.SetResult(numPrimes);</code> which completes the task.<h2>Canceling Threads and Tasks</h2>
+<p>Canceling a thread or task is a complicated subject<sup>16</sup>, the essence 
+of which is described here.&nbsp; The first thing to determine is what it is 
+you're trying to cancel:</p>
+<ol>
+	<li>A CPU-bound thread that doesn't wait on any mutexes, semaphores, or 
+	other &quot;delays&quot;.</li>
+	<li>An I/O-bound thread that waits on the completion of an asynchronous I/O 
+	operation.</li>
+	<li>A thread that waits on a mutex or semaphore to release it.</li>
+</ol>
+<p>All three approaches can take advantage of the <code>CancellationTokenSource</code> 
+class, but how you use the token varies according to the above three options:</p>
+<ol>
+	<li>CPU-bound work: typically polls the cancellation token.&nbsp; You can 
+	choose to:<ol>
+		<li>Operation cancellation: Clean up and exit the thread.</li>
+		<li>Object cancellation: Set up an object that implements a Cancel (or 
+		similar) method and the object-internal mechanism for canceling the 
+		work.</li>
+	</ol>
+	</li>
+	<li>I/O-bound work: this requires registering a callback that in turn 
+	cancels the async I/O operation.</li>
+	<li>Mutex/Semaphore: This requires setting up a wait handle that you pass to 
+	the mutex or sempahore.&nbsp; Canceling a thread in a wait state releases 
+	the thread and allows it to terminate.</li>
+</ol>
+<p>Lastly, the proper use of the OperationCanceledException is important so that 
+your code interacts well with library code, and vice-versa.&nbsp; An important 
+thing to understand is that cancellation is <i>cooperative</i> -- requesting a 
+cancel does not mean that the listener of the token has to actually stop.</p>
+<p>Let's say we want to set an upper limit of 1 second of processing for 
+computing primes using our brute force algorithm.&nbsp; First off, we should 
+create cancellation tokens for <i>each operation.</i>&nbsp; If performing object 
+cancellation, one token can cancel all the required objects.&nbsp; Here we'll 
+focus on canceling operations, not objects.</p>
 <p>&nbsp;</p>
-<pre>&nbsp;</pre>
+<p>&nbsp;</p>
+<p>The ThreadPool Class</p>
+<p>Writing Your Own Thread Pool</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
+<p>
+<a href="https://channel9.msdn.com/Series/Three-Essential-Tips-for-Async/Tip-2-Distinguish-CPU-Bound-work-from-IO-bound-work">
+https://channel9.msdn.com/Series/Three-Essential-Tips-for-Async/Tip-2-Distinguish-CPU-Bound-work-from-IO-bound-work</a> </p>
+<p>
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads">
+https://docs.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads</a> </p>
+<p>SemphoreSlim</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>
@@ -1418,6 +1466,9 @@ https://en.wikipedia.org/wiki/Cooperative_multitasking</a></p>
 <p><sup>15</sup> -
 <a href="https://en.wikipedia.org/wiki/Preemption_(computing)#PREEMPTIVE">
 https://en.wikipedia.org/wiki/Preemption_(computing)#PREEMPTIVE</a></p>
+<p><sup>16</sup> -
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads">
+https://docs.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads</a> </p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>Calling the algorithm:</p>
