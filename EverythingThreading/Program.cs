@@ -41,7 +41,8 @@ namespace Primes
         static object locker = new object();
         static Mutex mutex = new Mutex();
 
-        static async Task<int> Main(string[] args)
+        // static async Task<int> Main(string[] args)
+        static int Main(string[] args)
         {
             Thread.GetDomain().UnhandledException += (sndr, exargs) =>
             {
@@ -91,7 +92,10 @@ namespace Primes
 
             // DurationOf(HybridAwaitableThread, "Hybrid awaitable thread:");
 
-            await AsyncVoidExceptionTest();
+            // await AsyncVoidExceptionTest();
+
+            // DurationOf(CancelThreads, "Cancelling threads after 1 second.");
+            DurationOf(CancelTasks, "Cancelling tasks after 1 second.");
 
             Console.WriteLine("Waiting for ENTER...");
 
@@ -705,6 +709,125 @@ namespace Primes
             }
 
             return 0;
+        }
+
+        // ===================================
+
+        static void CancellableThread(object parms)
+        {
+            (int threadNum, CancellationTokenSource cts) parm = (ValueTuple<int, CancellationTokenSource>)parms;
+
+            DurationOf(() =>
+            {
+                int numPrimes = 0;
+                int n;
+
+                while ((n = Interlocked.Increment(ref nextNumber)) < MAX)
+                {
+                    if (parm.cts.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    if (IsPrime(n))
+                    {
+                        ++numPrimes;
+                    }
+                }
+
+                Interlocked.Add(ref totalNumPrimes, numPrimes);
+                return numPrimes;
+            }, $"Thread: {parm.threadNum}");
+        }
+
+        static int CancelThreads()
+        {
+            List<(Thread thread, int threadNum, CancellationTokenSource cts)> threads = new List<(Thread thread, int threadNum, CancellationTokenSource cts)>();
+            int numProcs = Environment.ProcessorCount;
+
+            for (int i = 0; i < numProcs; i++)
+            {
+                var thread = new Thread(new ParameterizedThreadStart(CancellableThread));
+                var cts = new CancellationTokenSource();
+                thread.IsBackground = true;
+                threads.Add((thread, i, cts));
+            }
+
+            totalNumPrimes = 0;
+            nextNumber = 1;
+            threads.ForEach(t => t.thread.Start((t.threadNum, t.cts)));
+
+            // After 1 second, cancel our threads
+            threads.ForEach(t => t.cts.CancelAfter(1000));
+            threads.ForEach(t => t.thread.Join());
+
+            return totalNumPrimes;
+        }
+
+        // ===================================
+
+        static void CancellableTask(int threadNum, CancellationTokenSource cts)
+        {
+            DurationOf(() =>
+            {
+                int numPrimes = 0;
+                int n;
+
+                while ((n = Interlocked.Increment(ref nextNumber)) < MAX)
+                {
+                    cts.Token.ThrowIfCancellationRequested();
+                    //if (cts.IsCancellationRequested)
+                    //{
+                    //    throw new OperationCanceledException();
+                    //}
+
+                    if (IsPrime(n))
+                    {
+                        ++numPrimes;
+                    }
+                }
+
+                Interlocked.Add(ref totalNumPrimes, numPrimes);
+                return numPrimes;
+            }, $"Thread: {threadNum}");
+        }
+
+        static int CancelTasks()
+        {
+            int numProcs = Environment.ProcessorCount;
+            totalNumPrimes = 0;
+            nextNumber = 1;
+            List<(Task task, CancellationTokenSource  cts)> tasks = new List<(Task, CancellationTokenSource)>();
+            DateTime start = DateTime.Now;
+
+            for (int i = 0; i < numProcs; i++)
+            {
+                Console.WriteLine("Starting thread " + i + " at " + (DateTime.Now - start).TotalMilliseconds + " ms");
+                var cts = new CancellationTokenSource();
+                var task = Task.Run(() => CancellableTask(i, cts), cts.Token);
+                tasks.Add((task, cts));
+            }
+
+            tasks.ForEach(t => t.cts.CancelAfter(1000));
+
+            try
+            {
+                Task.WaitAll(tasks.Select(t => t.task).ToArray());
+            }
+            catch (AggregateException ex)
+            {
+                Console.WriteLine(ex.Message);
+
+                tasks.ForEachWithIndex((t, i) =>
+                {
+                    Console.WriteLine("Task " + i);
+                    Console.WriteLine("Is canceled: " + t.task.IsCanceled);
+                    Console.WriteLine("Is completed: " + t.task.IsCompleted);
+                    Console.WriteLine("Is faulted: " + t.task.IsFaulted);
+                });
+            }
+
+            return totalNumPrimes;
         }
     }
 }

@@ -1348,7 +1348,7 @@ the task is done:</p>
   }, $&quot;Thread: {parm.threadNum}&quot;);
 }</pre>
 <p>The salient line here is <code>parm.tcs.SetResult(numPrimes);</code> which completes the task.<h2>Canceling Threads and Tasks</h2>
-<p>Canceling a thread or task is a complicated subject<sup>16</sup>, the essence 
+<p>Canceling a thread or task is a complicated subject<sup>16,17</sup>, the essence 
 of which is described here.&nbsp; The first thing to determine is what it is 
 you're trying to cancel:</p>
 <ol>
@@ -1375,7 +1375,7 @@ class, but how you use the token varies according to the above three options:</p
 	the mutex or sempahore.&nbsp; Canceling a thread in a wait state releases 
 	the thread and allows it to terminate.</li>
 </ol>
-<p>Lastly, the proper use of the OperationCanceledException is important so that 
+<p>Lastly, the proper use of the <code>OperationCanceledException</code> is important so that 
 your code interacts well with library code, and vice-versa.&nbsp; An important 
 thing to understand is that cancellation is <i>cooperative</i> -- requesting a 
 cancel does not mean that the listener of the token has to actually stop.</p>
@@ -1384,6 +1384,176 @@ computing primes using our brute force algorithm.&nbsp; First off, we should
 create cancellation tokens for <i>each operation.</i>&nbsp; If performing object 
 cancellation, one token can cancel all the required objects.&nbsp; Here we'll 
 focus on canceling operations, not objects.</p>
+<h3>Canceling Threads</h3>
+<p><img border="0" src="cancel1.png" width="314" height="299"></p>
+<p>Here, when we instantiate the threads, we pass a cancellation token for each 
+thread to check:</p>
+<pre>static int CancelThreads()
+{
+  List&lt;(Thread thread, int threadNum, CancellationTokenSource cts)&gt; threads = 
+    new List&lt;(Thread thread, int threadNum, CancellationTokenSource cts)&gt;();
+  int numProcs = Environment.ProcessorCount;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var thread = new Thread(new ParameterizedThreadStart(CancellableThread));
+    var cts = new CancellationTokenSource();
+    thread.IsBackground = true;
+    threads.Add((thread, i, cts));
+  }
+
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  threads.ForEach(t =&gt; t.thread.Start((t.threadNum, t.cts)));
+
+  // After 1 second, cancel our threads
+  threads.ForEach(t =&gt; t.cts.CancelAfter(1000));
+  threads.ForEach(t =&gt; t.thread.Join());
+
+  return totalNumPrimes;
+}</pre>
+<p>We then request that each thread is cancelled after 1 second.&nbsp; The 
+worker thread checks its token for each iteration:</p>
+<pre>static void CancellableThread(object parms)
+{
+  (int threadNum, CancellationTokenSource cts) parm = (ValueTuple&lt;int, CancellationTokenSource&gt;)parms;
+
+  DurationOf(() =&gt;
+  {
+    int numPrimes = 0;
+    int n;
+
+    while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)
+    {
+      if (parm.cts.IsCancellationRequested)
+      {
+        break;
+      }
+
+      if (IsPrime(n))
+      {
+        ++numPrimes;
+      }
+    }
+
+    Interlocked.Add(ref totalNumPrimes, numPrimes);
+    return numPrimes;
+  }, $&quot;Thread: {parm.threadNum}&quot;);
+}</pre>
+<p>In the screenshot above, notice that the threads don't terminate exactly at 1 
+second -- the brute force algorithm takes some time between each iteration!</p>
+<h3>Canceling Tasks</h3>
+<p>With tasks, we can exit the task:</p>
+<ul>
+	<li>gracefully</li>
+	<li>by calling the cancellation token's ThrowIfCancellationRequested method</li>
+	<li>by throwing OperationCanceledException ourselves.</li>
+</ul>
+<p>Let's look at the differences.&nbsp; Here's the setup common to all three 
+cancellation examples:</p>
+<pre>static int CancelTasks()
+{
+  int numProcs = Environment.ProcessorCount;
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  List&lt;(Task task, CancellationTokenSource cts)&gt; tasks = new List&lt;(Task, CancellationTokenSource)&gt;();
+  DateTime start = DateTime.Now;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    Console.WriteLine(&quot;Starting thread &quot; + i + &quot; at &quot; + (DateTime.Now - start).TotalMilliseconds + &quot; ms&quot;);
+    var cts = new CancellationTokenSource();
+    var task = Task.Run(() =&gt; CancellableTask(i, cts), cts.Token);
+    tasks.Add((task, cts));
+  }
+
+  tasks.ForEach(t =&gt; t.cts.CancelAfter(1000));
+
+  try
+  {
+    Task.WaitAll(tasks.Select(t =&gt; t.task).ToArray());
+  }
+  catch (AggregateException ex)
+  {
+    Console.WriteLine(ex.Message);
+
+    tasks.ForEachWithIndex((t, i) =&gt;
+    {
+      Console.WriteLine(&quot;Task &quot; + i);
+      Console.WriteLine(&quot;Is canceled: &quot; + t.task.IsCanceled);
+      Console.WriteLine(&quot;Is completed: &quot; + t.task.IsCompleted);
+      Console.WriteLine(&quot;Is faulted: &quot; + t.task.IsFaulted);
+    });
+  }
+
+  return totalNumPrimes;
+}</pre>
+<h4>Gracefully Cancel the Task</h4>
+<p>
+<img border="0" src="cancel2.png" width="328" height="337"></p>
+<p>
+The implementation of the worker task:</p>
+<pre>static void CancellableTask(int threadNum, CancellationTokenSource cts)
+{
+  DurationOf(() =&gt;
+  {
+    int numPrimes = 0;
+    int n;
+
+    while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)
+    {
+      if (cts.IsCancellationRequested)
+      {
+        // Graceful exit
+        break;
+      }
+
+      if (IsPrime(n))
+      {
+        ++numPrimes;
+      }
+    }
+
+    Interlocked.Add(ref totalNumPrimes, numPrimes);
+    return numPrimes;
+  }, $&quot;Thread: {threadNum}&quot;);
+}</pre>
+<p>Notice how long it takes to cancel a task!&nbsp; We requested that the task 
+be cancelled after 1 second, but it actually takes the tasks 4 seconds to 
+cancel.&nbsp; As expected with a graceful exit, no exception is thrown.</p>
+<h4>Call the Token's ThrowIfCancellationRequested</h4>
+<p><img border="0" src="cancel3.png" width="337" height="428"></p>
+<p>The implementation differs in that, instead of:</p>
+<pre>if (cts.IsCancellationRequested)
+{
+  // Graceful exit
+  break;
+}</pre>
+<p>We do this instead:</p>
+<pre>cts.Token.ThrowIfCancellationRequested();</pre>
+<p>In this example, notice that an exception is thrown and each task is in the 
+&quot;canceled&quot; state <i>and</i> the &quot;completed&quot; state.</p>
+<p>Notice in the setup this very important line:</p>
+<pre>var task = Task.Run(() =&gt; CancellableTask(i, cts), cts.Token);</pre>
+<p>*** IMP **** If we don't set the cancellation token as part of the <code>Task.Run</code>, 
+the task's <code>IsCanceled</code> flag is NOT set and the exception is treated as a fault 
+instead!</p>
+<h4>Throwing Our Own OperationCanceledException</h4>
+<p><img border="0" src="cancel4.png" width="284" height="420"></p>
+<p>The implementation is again slightly different:</p>
+<pre>if (cts.IsCancellationRequested)
+{
+  throw new OperationCanceledException();
+}</pre>
+<p>Notice here that the task's <code>IsCanceled</code> flag is false but the <code>IsFaulted</code> flag 
+is true!</p>
+<h3>Canceling Threads Awaiting on a Semaphore</h3>
+<p>Lastly, let's go back the the threading example where we used a semaphore to 
+signal work was queued and look at how to cancel the thread.&nbsp; In this 
+example, I will specifically NOT queue any work so we can can be sure that the 
+semaphore is released as the result of the cancellation rather than processing 
+some work.</p>
+<p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>The ThreadPool Class</p>
@@ -1469,6 +1639,10 @@ https://en.wikipedia.org/wiki/Preemption_(computing)#PREEMPTIVE</a></p>
 <p><sup>16</sup> -
 <a href="https://docs.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads">
 https://docs.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads</a> </p>
+<p><sup>17</sup> -
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/parallel-programming/task-cancellation">
+https://docs.microsoft.com/en-us/dotnet/standard/parallel-programming/task-cancellation</a> </p>
+<p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>Calling the algorithm:</p>
