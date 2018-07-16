@@ -16,10 +16,13 @@ handling, and cancellation tokens. </p>
 <h2>Introduction</h2>
 <p>I was recently asked to provide some training on how threads are used in C#.&nbsp; 
 What started off as simple (doesn't it always) turned into a detailed analysis 
-of different approaches to threading and various ancillary topics.&nbsp; While 
+of different approaches to threading and important topics such as canceling 
+tasks and exception handling..&nbsp; While 
 this has all been discussed before, I'm hoping that this article provides some 
 interesting insights and coverage of the topic that perhaps hasn't been done 
-before in one article.</p>
+before in one article.&nbsp; Threading, tasks, cancellation, exceptions, and so 
+forth is a <i>huge</i> topic, whole books have been written on the subject.&nbsp; 
+This article presents an incomplete but concise overview with lots of examples.</p>
 <h3>What Is a Thread?</h3>
 <p>I suppose I should start with a brief description of what a thread is, 
 although quite frankly, I'm assuming you actually know what a thread is.&nbsp; 
@@ -65,12 +68,12 @@ brute force:</p>
   for (int i = 2; i &lt;= n / 2 &amp;&amp; ret; ret = n % i++ != 0);
   return ret;
 }</pre>
-<p>Yes, there actually is no content to the for loop -- it does end with a <code>;</code>.</p>
+<p>Yes, there actually is no content to the for loop -- it does end with a <code>;</code> 
+because the look terminates when ret becomes false.</p>
 <p>Obviously, you would NEVER write a prime number calculation this way (a much 
 better approach is the 
 <a href="https://en.wikipedia.org/wiki/Sieve_of_Eratosthenes">Sieve of 
-Eranthoses</a>, which I'll actually work with 
-later in this article) but this algorithm has the advantage of:</p>
+Eranthoses</a>) but this algorithm has the advantage of:</p>
 <ul>
 	<li>Being slow.</li>
 	<li>Returning a true/false for each number.</li>
@@ -104,7 +107,7 @@ object is a root level <code>Object</code>:</p>
 section&quot;, meaning that only one thread could enter the code at a time.&nbsp; 
 Native Windows programmers will be familiar with the CRITICAL_SECTION<sup>4</sup> 
 structure and related methods.</p>
-<p>Locks can be dangerous:</p>
+<p><img border="0" src="important.png" width="38" height="32"> Locks can be dangerous:</p>
 <ul>
 	<li>If what you're performing in the lock takes a long time, your thread 
 	will lose performance as it waits for the lock to be released by another 
@@ -127,8 +130,7 @@ to demonstrate threading, so it's useful to implement it once.</p>
   for (int i = start; i &lt; end; numPrimes += IsPrime(i++) ? 1 : 0);
   return numPrimes;
 }</pre>
-<p>Yeah, another one of those do-nothing loops where the work is done in the 
-iterator portion of the for loop. </p>
+<p>Yes, another one of those do-nothing loops where the work is done in the iterator portion of the for loop. </p>
 <h2>Brute Force Algorithm</h2>
 <p>Here we want to find how many primes there are between 2 and 500,000.&nbsp; I 
 chose 500,000 as the maximum as it takes about 35 seconds on my machine to 
@@ -222,7 +224,8 @@ Total seconds = 16.4079704</pre>
 <p>Notice once the threads have been started, there is this statement:</p>
 <pre>threads.ForEach(t =&gt; t.thread.Join());</pre>
 <p>Here the Join method suspends execution until the thread on which Join is 
-called has finished.&nbsp; Be aware:</p>
+called has finished.&nbsp; </p>
+<p><img border="0" src="important.png" width="38" height="32"> Be aware:</p>
 <ul>
 	<li>This can cause the current thread to indefinitely suspend its operation.</li>
 	<li>You wouldn't do this on a UI thread as the UI will no longer respond to 
@@ -232,7 +235,8 @@ called has finished.&nbsp; Be aware:</p>
 <p>Notice this statement:</p>
 <pre>thread.IsBackground = true;</pre>
 <p>Telling the thread that it is a background thread ensures that it is killed 
-when the application exits.&nbsp; If you have a thread that is not a background 
+when the application exits.&nbsp; </p>
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; If you have a thread that is not a background 
 thread and you close the application or it in some other way terminates, the 
 thread will continue to exist (and run) as a process.</p>
 <h3>Thread Parameters</h3>
@@ -248,7 +252,7 @@ the thread is started:</p>
 the thread:</p>
 <pre>(int threadNum, int start, int end) parm = (ValueTuple&lt;int, int, int&gt;)parms;</pre>
 <h3>Avoiding Casting the Object Parameter With a Lambda Expression</h3>
-<p>You can avoid the cast using an lambda expression which provides closure for 
+<p><img border="0" src="usefulInfo.png" width="38" height="32">&nbsp; You can avoid the cast using an lambda expression which provides closure for 
 the current parameter values, like this:</p>
 <pre>for (int i = 0; i &lt; numProcs; i++)
 {
@@ -270,7 +274,7 @@ lambda expression is perfectly valid.</p>
 signature, avoiding the cast:</p>
 <pre>static void BruteForceThread(int threadNum, int start, int end)</pre>
 <h3>Using the ThreadStart Delegate is Time Costly!</h3>
-<p>These two lines of code are NOT equivalent:</p>
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; These two lines of code are NOT equivalent:</p>
 <pre>var thread = new Thread(() =&gt; BruteForceThread(j, start, end));</pre>
 <p>vs.</p>
 <pre>var thread = new Thread(new ThreadStart(() =&gt; BruteForceThread(j, start, end)));</pre>
@@ -306,7 +310,7 @@ looks</i> like it is evenly distributed because we're giving each thread 1/n<sup
 work, CPU cores are not efficiently used -- the thread with the lowest number 
 range finishes much sooner than the thread with the highest number range.</p>
 <h3>Asking for Work vs. Telling the Thread What Work to Do</h3>
-<p>A clue as to whether your threads are optimized is this: are you telling your 
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; A clue as to whether your threads are optimized is this: are you telling your 
 threads what work to do, or are your threads requesting work?&nbsp; In the 
 threaded brute force algorithm above, we are <i>telling</i> the thread what work 
 it should be doing.&nbsp; In this next iteration, the thread will be <i>asking</i> 
@@ -387,7 +391,8 @@ process -- there's no queuing of work, semaphores, or other complexity.&nbsp;
 However, in order to get the next number and update the total count, each thread 
 must ensure that it momentarily blocks the other threads.&nbsp; Otherwise, 
 another thread might get exactly the same number or the total might be updated 
-simultaneously, resulting in an incorrect count.&nbsp; .NET has an <code>Interlocked</code> 
+simultaneously, resulting in an incorrect count.&nbsp; </p>
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; .NET has an <code>Interlocked</code> 
 class (read more
 <a href="https://msdn.microsoft.com/en-us/library/system.threading.interlocked(v=vs.110).aspx">
 here</a>) that ensures that the operation is performed atomically, meaning that, 
@@ -480,6 +485,12 @@ Threaded get next work item brute force:
 Number of primes is : 41538
 Total seconds = 11.7304613</pre>
 <p>So that's neat -- the timing is essentially identical.</p>
+<p><img border="0" src="note.png" width="24" height="32">&nbsp; Keep in 
+mind that <code>AsParallel.ForAll</code> is a synchronous operation -- code execution 
+continues after all the numbers have been processed.&nbsp; While the processing 
+itself is asynchronous, you application will be waiting for the <code>ForAll</code> to 
+finish.&nbsp; Mixing <code>AsParallel</code> with awaitable tasks (discussed next) is rather 
+of pointless.</p>
 <h3>Task.Run</h3>
 <p><code>Task.Run</code> is one of the ways to implement a task-based 
 asynchronous pattern<sup>3</sup> (TAP) quickly to create a worker thread.&nbsp; This is 
@@ -540,7 +551,7 @@ keyword) has the following effect:</p>
 	<li>When the asynchronous process completes, code execution continues with 
 	the code immediately after the <code>await</code> statement.</li>
 </ol>
-<p>There's a few &quot;gotcha's&quot; in this.&nbsp; First, it is useful to be aware 
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; There's a few &quot;gotcha's&quot; in this.&nbsp; First, it is useful to be aware 
 of the context in which the continuation is executed.&nbsp; For WinForm 
 applications in which the <code>await</code> was called on the application thread 
 (the thread running the UI), execution 
@@ -560,7 +571,7 @@ Part III</a>.</p>
 to be difficult.&nbsp; The reason for this is that it's not obvious to the method performing the call 
 to an <code>async</code> method will return immediately.&nbsp; This is why the guidance on 
 these method names is to append them with &quot;Async&quot;.</p>
-<p>Thirdly, the mental gyrations get even harder when there are nested <code>await</code> calls.</p>
+<p>Third, the mental gyrations get even harder when there are nested <code>await</code> calls.</p>
 <p>Conversely, the <code>Task</code> class provides some really useful features, particularly 
 with regards to returning a result and passing exceptions back to you if an 
 exception occurs while executing the task.</p>
@@ -716,7 +727,7 @@ Total seconds = 13.5073256</pre>
 
   return t;
 }</pre>
-<p>The await should return to the caller.&nbsp; It does -- we know this because 
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; The await should return to the caller.&nbsp; It does -- we know this because 
 we note that the tasks are created all at once -- there is no delay between the 
 start times.&nbsp; But what does the method return?&nbsp; It returns a <code>Task&lt;int&gt;</code>, 
 and the return statement is <i>after</i> the continuation.&nbsp; It's <i>not 
@@ -959,15 +970,14 @@ want to discuss why it's wrong, so this is a teaching example:</p>
 happen, is a really bad idea.&nbsp; Instead, completion of a task should be 
 signaled using a semaphore or a task &quot;wait&quot; call, but for now we'll use this 
 code.</p>
-<p>IMP! One of the complexities of working with semaphores in threads (as opposed to 
-awaitable async methods) is that while you can easily enqueue the work for the 
+<p><img border="0" src="important.png" width="38" height="32"> One of the complexities of working with semaphores in threads (as opposed to awaitable async methods) is that while you can easily enqueue the work for the 
 thread to pick up, you don't really know when the threads have finished their 
 work.&nbsp; For example:</p>
 <p><img border="0" src="sem1.png" width="608" height="130">&nbsp; </p>
 <p>Notice the second computation of the number of primes is short by 4.&nbsp; 
 This is because, while the queue is empty, indicating that all work has been 
 done, the threads hadn't actually finished processing!</p>
-<p>IMP! As mentioned earlier, another problem is telling the thread, which is 
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; As mentioned earlier, another problem is telling the thread, which is 
 waiting for work, that it should terminate because the application doesn't need 
 it anymore.&nbsp; We can deal with both issues by enqueuing a 0 as a poor-man's 
 flag to indicate that the thread should terminate.&nbsp; But we have to do this 
@@ -1215,7 +1225,7 @@ static async Task DoWorkAsyncThrowsException(int threadNum)
 <p>Notice the output now, after moving the try-catch block to the <code>Wait</code> call:</p>
 <p><img border="0" src="ex5.png" width="269" height="354"></p>
 <h3>Do NOT use async void!</h3>
-<p>Methods declared as &quot;async void&quot; do not have a <code>Task</code> object -- exceptions 
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; Methods declared as &quot;async void&quot; do not have a <code>Task</code> object -- exceptions 
 thrown in the &quot;task&quot; will be raised directly on the <code>SynchronizationContext</code>.&nbsp; 
 In a console app, that means we can't catch the exception, instead it's handled 
 by the <code>AppDomain.CurrentDomain.UnhandledException</code>.&nbsp; Here's an example:</p>
@@ -1389,10 +1399,9 @@ cancellation, one token can cancel all the required objects.&nbsp; Here we'll
 focus on canceling operations, not objects.</p>
 <h3>Canceling Threads</h3>
 <p><img border="0" src="cancel1.png" width="314" height="299"></p>
-<p>Do not cancel a task by killing it with <code>thread.Abort()</code>.&nbsp; You run the 
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; Do not cancel a task by killing it with <code>thread.Abort()</code>.&nbsp; You run the 
 risk of memory leaks, deadlocks and other nasty affects by terminating a thread 
-without giving it the opportunity to do its cleanup.&nbsp; </p>
-<p>Instead, here, when we instantiate the threads, we pass a cancellation token for each 
+without giving it the opportunity to do its cleanup.&nbsp; Instead, here, when we instantiate the threads, we pass a cancellation token for each 
 thread to check:</p>
 <pre>static int CancelThreads()
 {
@@ -1541,7 +1550,7 @@ cancel.&nbsp; As expected with a graceful exit, no exception is thrown.</p>
 &quot;canceled&quot; state <i>and</i> the &quot;completed&quot; state.</p>
 <p>Notice in the setup this very important line:</p>
 <pre>var task = Task.Run(() =&gt; CancellableTask(i, cts), cts.Token);</pre>
-<p>*** IMP **** If we don't set the cancellation token as part of the <code>Task.Run</code>, 
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; If we don't set the cancellation token as part of the <code>Task.Run</code>, 
 the task's <code>IsCanceled</code> flag is NOT set and the exception is treated as a fault 
 instead!</p>
 <h4>Throwing Our Own OperationCanceledException</h4>
