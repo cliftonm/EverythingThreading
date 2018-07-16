@@ -95,7 +95,8 @@ namespace Primes
             // await AsyncVoidExceptionTest();
 
             // DurationOf(CancelThreads, "Cancelling threads after 1 second.");
-            DurationOf(CancelTasks, "Cancelling tasks after 1 second.");
+            // DurationOf(CancelTasks, "Cancelling tasks after 1 second.");
+            CancellableSemaphores();
 
             Console.WriteLine("Waiting for ENTER...");
 
@@ -828,6 +829,90 @@ namespace Primes
             }
 
             return totalNumPrimes;
+        }
+
+        // ===================================
+
+        static void CancellableSemaphores()
+        {
+            SemaphoreSlim sem = new SemaphoreSlim(0, Int32.MaxValue);
+            int numProcs = Environment.ProcessorCount;
+            var queue = new ConcurrentQueue<int>();
+            int numPrimes = 0;
+            List<(Task task, CancellationTokenSource cts)> tasks = new List<(Task, CancellationTokenSource)>();
+
+            for (int i = 0; i < numProcs; i++)
+            {
+                var cts = new CancellationTokenSource();
+
+                tasks.Add((Task.Run(() =>
+                {
+                    while (true)
+                    {
+                        //try
+                        //{
+                            sem.Wait(cts.Token);
+                        //}
+                        //catch (OperationCanceledException)
+                        //{
+                        //    cts.Token.ThrowIfCancellationRequested();
+                        //}
+
+                        if (queue.TryDequeue(out int n))
+                        {
+                            if (n == 0)
+                            {
+                                break;
+                            }
+
+                            if (IsPrime(n))
+                            {
+                                Interlocked.Increment(ref numPrimes);
+                            }
+                        }
+                    }
+                }, cts.Token), cts));
+            }
+
+            DurationOf(() =>
+            {
+                // Don't enqueue anything.  We want the thread to wait and be released by the cancellation token.
+                //Enumerable.Range(2, MAX).ForEach(n =>
+                //{
+                //    queue.Enqueue(n);
+                //    sem.Release();
+                //});
+
+                //for (int i = 0; i < numProcs; i++)
+                //{
+                //    queue.Enqueue(0);
+                //}
+
+                //sem.Release(numProcs);
+
+                tasks.ForEach(t => t.cts.CancelAfter(1000));
+
+                try
+                {
+                    Task.WaitAll(tasks.Select(t => t.task).ToArray());
+                }
+                catch (AggregateException ex)
+                {
+                    Console.WriteLine(ex.Message);
+
+                    tasks.ForEachWithIndex((t, i) =>
+                    {
+                        Console.WriteLine("Task " + i);
+                        Console.WriteLine("Task Exception: " + (t.task.Exception?.Message ?? "No exception"));
+                        Console.WriteLine("InnerExceptions[]: " + ex.InnerExceptions[i].Message);
+                        Console.WriteLine("Is canceled: " + t.task.IsCanceled);
+                        Console.WriteLine("Is completed: " + t.task.IsCompleted);
+                        Console.WriteLine("Is faulted: " + t.task.IsFaulted);
+                    });
+                }
+
+                return numPrimes;
+            }, "Threads using cancellable semaphores");
         }
     }
 }

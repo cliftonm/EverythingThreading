@@ -1375,18 +1375,24 @@ class, but how you use the token varies according to the above three options:</p
 	the mutex or sempahore.&nbsp; Canceling a thread in a wait state releases 
 	the thread and allows it to terminate.</li>
 </ol>
-<p>Lastly, the proper use of the <code>OperationCanceledException</code> is important so that 
+<p>The proper use of the <code>OperationCanceledException</code> is important so that 
 your code interacts well with library code, and vice-versa.&nbsp; An important 
 thing to understand is that cancellation is <i>cooperative</i> -- requesting a 
 cancel does not mean that the listener of the token has to actually stop.</p>
-<p>Let's say we want to set an upper limit of 1 second of processing for 
+<p>Lastly, tasks cannot be canceled if the code library implementing the task 
+does not observe the <code>CancellationToken</code>!&nbsp; If your code implements a task, 
+consider well whether you should be observing a cancellation token yourself!</p>
+<p>For the following examples, let's say we want to set an upper limit of 1 second of processing for 
 computing primes using our brute force algorithm.&nbsp; First off, we should 
 create cancellation tokens for <i>each operation.</i>&nbsp; If performing object 
 cancellation, one token can cancel all the required objects.&nbsp; Here we'll 
 focus on canceling operations, not objects.</p>
 <h3>Canceling Threads</h3>
 <p><img border="0" src="cancel1.png" width="314" height="299"></p>
-<p>Here, when we instantiate the threads, we pass a cancellation token for each 
+<p>Do not cancel a task by killing it with <code>thread.Abort()</code>.&nbsp; You run the 
+risk of memory leaks, deadlocks and other nasty affects by terminating a thread 
+without giving it the opportunity to do its cleanup.&nbsp; </p>
+<p>Instead, here, when we instantiate the threads, we pass a cancellation token for each 
 thread to check:</p>
 <pre>static int CancelThreads()
 {
@@ -1548,55 +1554,121 @@ instead!</p>
 <p>Notice here that the task's <code>IsCanceled</code> flag is false but the <code>IsFaulted</code> flag 
 is true!</p>
 <h3>Canceling Threads Awaiting on a Semaphore</h3>
+<p><img border="0" src="ex9.png" width="373" height="402"></p>
 <p>Lastly, let's go back the the threading example where we used a semaphore to 
 signal work was queued and look at how to cancel the thread.&nbsp; In this 
 example, I will specifically NOT queue any work so we can can be sure that the 
 semaphore is released as the result of the cancellation rather than processing 
-some work.</p>
-<p>&nbsp;</p>
+some work.&nbsp; As before, this is an &quot;inline&quot; method -- notice:</p>
+<ul>
+	<li>As we did before, we're passing the cancellation token as a parameter to 
+	<code>Task.Run</code>.</li>
+	<li>Something new here -- we're using SemaphoreSlim instead of Semaphore 
+	because SemaphoreSlim supports a Wait method that accepts the cancellation 
+	token as a parameter.&nbsp; This is how the semaphore is released when the 
+	cancel request is made.</li>
+</ul>
+<p>Here's the code that instantiates and executes the tasks, then cancels them 
+after 1 second:</p>
+<pre>static void CancellableSemaphores()
+{
+  SemaphoreSlim sem = new SemaphoreSlim(0, Int32.MaxValue);
+  int numProcs = Environment.ProcessorCount;
+  var queue = new ConcurrentQueue&lt;int&gt;();
+  int numPrimes = 0;
+  List&lt;(Task task, CancellationTokenSource cts)&gt; tasks = new List&lt;(Task, CancellationTokenSource)&gt;();
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var cts = new CancellationTokenSource();
+
+    tasks.Add((Task.Run(() =&gt;
+    {
+      while (true)
+      {
+        sem.Wait(cts.Token);
+
+        if (queue.TryDequeue(out int n))
+        {
+          if (n == 0)
+          {
+            break;
+          }
+
+          if (IsPrime(n))
+          {
+            Interlocked.Increment(ref numPrimes);
+          }
+        }
+      }
+    }, cts.Token), cts));
+  }
+
+  DurationOf(() =&gt;
+  {
+    // Don't enqueue anything. We want the thread to wait and be released by the cancellation token.
+    tasks.ForEach(t =&gt; t.cts.CancelAfter(1000));
+
+    try
+    {
+      Task.WaitAll(tasks.Select(t =&gt; t.task).ToArray());
+    }
+    catch (AggregateException ex)
+    {
+      Console.WriteLine(ex.Message);
+
+      tasks.ForEachWithIndex((t, i) =&gt;
+      {
+        Console.WriteLine(&quot;Task &quot; + i);
+        Console.WriteLine(&quot;Is canceled: &quot; + t.task.IsCanceled);
+        Console.WriteLine(&quot;Is completed: &quot; + t.task.IsCompleted);
+        Console.WriteLine(&quot;Is faulted: &quot; + t.task.IsFaulted);
+      });
+    }
+
+    return numPrimes;
+  }, &quot;Threads using cancellable semaphores&quot;);
+}</pre>
+<p>Notice how the semaphore is released as a result of the cancel request.&nbsp; This code, as the screenshot above shows, will throw an exception on the task 
+that is caught in the Task.WaitAll call.&nbsp; Instead of:</p>
+<pre>sem.Wait(cts.Token);</pre>
+<p>We could catch the exception in the task and exit gracefully:</p>
+<pre>try
+{
+  sem.Wait(cts.Token);
+}
+catch (OperationCanceledException)
+{
+  break;
+}</pre>
+<p><img border="0" src="ex10.png" width="341" height="187"></p>
+<p>However, we don't know that the task was cancelled.&nbsp; The only way we 
+would know that a task has been cancelled is if we use some external mechanism, 
+even possibly a return value that indicates the task cancellation state.&nbsp; 
+To the outside world, the above code looks like the task completed all its work.&nbsp; </p>
+<p>We could also write 
+this somewhat redundant code:</p>
+<pre>try
+{
+  sem.Wait(cts.Token);
+}
+catch (OperationCanceledException)
+{
+  cts.Token.ThrowIfCancellationRequested();
+}</pre>
+<p>In all cases, the <code>AggregateException.Exceptions[]</code> contains 
+instances of <code>TaskCanceledException</code> exception types.</p>
+<h2>Conclusion</h2>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>The ThreadPool Class</p>
 <p>Writing Your Own Thread Pool</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>
-<a href="https://channel9.msdn.com/Series/Three-Essential-Tips-for-Async/Tip-2-Distinguish-CPU-Bound-work-from-IO-bound-work">
-https://channel9.msdn.com/Series/Three-Essential-Tips-for-Async/Tip-2-Distinguish-CPU-Bound-work-from-IO-bound-work</a> </p>
-<p>
-<a href="https://docs.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads">
-https://docs.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads</a> </p>
-<p>SemphoreSlim</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>
-<a href="https://stackoverflow.com/questions/5983779/catch-exception-that-is-thrown-in-different-thread#">https://stackoverflow.com/questions/5983779/catch-exception-that-is-thrown-in-different-thread#</a></p>
-<p>
-<a href="https://social.msdn.microsoft.com/Forums/vstudio/en-US/c95ba61b-78d3-462f-b09f-cd0571ffd22d/how-do-you-catch-exceptions-in-threaded-console-application?forum=csharpgeneral">
-https://social.msdn.microsoft.com/Forums/vstudio/en-US/c95ba61b-78d3-462f-b09f-cd0571ffd22d/how-do-you-catch-exceptions-in-threaded-console-application?forum=csharpgeneral</a></p>
-<p>
-Async void and exceptions:<a href="https://msdn.microsoft.com/en-us/magazine/jj991977.aspx"> 
-https://msdn.microsoft.com/en-us/magazine/jj991977.aspx</a></p>
-<p>Thread vs. Fiber</p>
-<p>LongRunning:
-<a href="http://blog.i3arnon.com/2015/07/02/task-run-long-running/">
-http://blog.i3arnon.com/2015/07/02/task-run-long-running/</a></p>
-<p>ThreadPool</p>
-<p>Write a Cooperative Multitasking (as opposed to a preemptive multitasking)</p>
+<p>Fibers: Write a Cooperative Multitasking (as opposed to a preemptive multitasking)</p>
 <p>ContinueWith</p>
 <p>Task.Start vs. Task.Run</p>
 <p>TaskCreationOptions.LongRunnning</p>
 <p>STA vs. MTA</p>
-<p>&quot;doing CPU work&quot;&nbsp; google it</p>
 <p>ThreadPool.QueueUserWorkItem / BackgroundWorker</p>
-<p>Working with the ThreadPool:
-<a href="https://docs.microsoft.com/en-us/dotnet/standard/threading/the-managed-thread-pool">
-https://docs.microsoft.com/en-us/dotnet/standard/threading/the-managed-thread-pool</a> </p>
-<p>Task Completion: https://stackoverflow.com/questions/16063520/how-do-you-create-an-asynchronous-method-in-c</p>
-<p>Thread / Task Cancellation</p>
-<p>Thread Exceptions</p>
-<p>Mutex, ManualResetEvent, AutoResetEvent</p>
-<p>&nbsp;</p>
 <p><sup>1</sup> -&nbsp; the Intel CPU LOCK instruction supports ADD, ADC, AND, 
 BTC, BTR, BTS, CMPXCHG, CMPXCH8B, DEC, INC, NEG, NOT, OR, SBB, SUB, XOR, XADD, 
 and XCHG</p>
@@ -1642,13 +1714,26 @@ https://docs.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-manag
 <p><sup>17</sup> -
 <a href="https://docs.microsoft.com/en-us/dotnet/standard/parallel-programming/task-cancellation">
 https://docs.microsoft.com/en-us/dotnet/standard/parallel-programming/task-cancellation</a> </p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>Calling the algorithm:</p>
-<p>The implementation:</p>
-<p>The worker thread:</p>
-<p>The results:</p>
+<p>Other Reading:</p>
+<p>
+<a href="https://channel9.msdn.com/Series/Three-Essential-Tips-for-Async/Tip-2-Distinguish-CPU-Bound-work-from-IO-bound-work">
+https://channel9.msdn.com/Series/Three-Essential-Tips-for-Async/Tip-2-Distinguish-CPU-Bound-work-from-IO-bound-work</a> </p>
+<p>
+<a href="https://stackoverflow.com/questions/5983779/catch-exception-that-is-thrown-in-different-thread#">https://stackoverflow.com/questions/5983779/catch-exception-that-is-thrown-in-different-thread#</a></p>
+<p>
+<a href="https://social.msdn.microsoft.com/Forums/vstudio/en-US/c95ba61b-78d3-462f-b09f-cd0571ffd22d/how-do-you-catch-exceptions-in-threaded-console-application?forum=csharpgeneral">
+https://social.msdn.microsoft.com/Forums/vstudio/en-US/c95ba61b-78d3-462f-b09f-cd0571ffd22d/how-do-you-catch-exceptions-in-threaded-console-application?forum=csharpgeneral</a></p>
+<p>
+Async void and exceptions:<a href="https://msdn.microsoft.com/en-us/magazine/jj991977.aspx"> 
+https://msdn.microsoft.com/en-us/magazine/jj991977.aspx</a></p>
+<p>LongRunning:
+<a href="http://blog.i3arnon.com/2015/07/02/task-run-long-running/">
+http://blog.i3arnon.com/2015/07/02/task-run-long-running/</a></p>
+<p>Working with the ThreadPool:
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/threading/the-managed-thread-pool">
+https://docs.microsoft.com/en-us/dotnet/standard/threading/the-managed-thread-pool</a> </p>
+<p>Task Completion: 
+<a href="https://stackoverflow.com/questions/16063520/how-do-you-create-an-asynchronous-method-in-c">https://stackoverflow.com/questions/16063520/how-do-you-create-an-asynchronous-method-in-c</a> </p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
