@@ -310,7 +310,7 @@ looks</i> like it is evenly distributed because we're giving each thread 1/n<sup
 work, CPU cores are not efficiently used -- the thread with the lowest number 
 range finishes much sooner than the thread with the highest number range.</p>
 <h3>Asking for Work vs. Telling the Thread What Work to Do</h3>
-<p><img border="0" src="important.png" width="38" height="32">&nbsp; A clue as to whether your threads are optimized is this: are you telling your 
+<p><img border="0" src="key-small.jpg" width="94" height="33">&nbsp;A clue as to whether your threads are optimized is this: are you telling your 
 threads what work to do, or are your threads requesting work?&nbsp; In the 
 threaded brute force algorithm above, we are <i>telling</i> the thread what work 
 it should be doing.&nbsp; In this next iteration, the thread will be <i>asking</i> 
@@ -1667,10 +1667,43 @@ catch (OperationCanceledException)
 }</pre>
 <p>In all cases, the <code>AggregateException.Exceptions[]</code> contains 
 instances of <code>TaskCanceledException</code> exception types.</p>
+<h2>The ThreadPool Class and CPU-Bound Work</h2>
+<p>There is no advantage to creating more threads than cores for CPU-bound work 
+-- that is, where each thread is never in a wait state.&nbsp; </p>
+<h3>More Threads than Cores</h3>
+<p>For example, when 
+I test the performance of 4 threads (not tasks, actual threads which do not use 
+the .NET <code>ThreadPool</code>) because there are 4 CPU's on my system, it 
+takes about 8 seconds.&nbsp; </p>
+<p><img border="0" src="tp1.png" width="336" height="263"></p>
+<p>If I increase the number of threads to 20:</p>
+<p><img border="0" src="tp2.png" width="337" height="61"></p>
+<p>The processing time is almost 9 seconds -- 2 seconds longer!&nbsp; The 
+overhead in doing all that context switching between threads is quite 
+noticeable.</p>
+<h3>More Tasks than Cores</h3>
+<p>With tasks, if the number of tasks I create is equal to the number of cores, 
+they all start pretty much at the same time (the times are in seconds):</p>
+<p><img border="0" src="tp3.png" width="263" height="201"></p>
+<p>Now look what happens when I try to start 20 CPU-bound tasks on a 4 core 
+system:</p>
+<p><img border="0" src="tp4.png" width="278" height="456"></p>
+<p>Again, the times are in <i>seconds.</i>&nbsp; Tasks 0-3 start as expected.&nbsp; 
+Then there is a 4 second delay before the next task starts, and 5 seconds for 
+the next one after that.&nbsp; By that time, the first 4 tasks have completed 
+all the work and the remaining tasks are created with nothing to do so they 
+terminate fairly quickly.&nbsp; The time delay after the first four tasks are 
+the consequence of the <code>ThreadPool</code>'s scheduler, which delays starting more 
+CPU-bound tasks when the number of tasks exceeds the number of cores.&nbsp; 
+There's a variety of write-ups on the behavior of the <code>ThreadPool</code>, particularly 
+that once tasks &gt; CPU cores, subsequent tasks are delayed by 500ms.&nbsp; 
+There's clearly a lot more going on than that!</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<h2>&nbsp;</h2>
 <h2>Conclusion</h2>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
-<p>The ThreadPool Class</p>
 <p>Writing Your Own Thread Pool</p>
 <p>Fibers: Write a Cooperative Multitasking (as opposed to a preemptive multitasking)</p>
 <p>ContinueWith</p>

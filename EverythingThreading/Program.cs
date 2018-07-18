@@ -96,7 +96,9 @@ namespace Primes
 
             // DurationOf(CancelThreads, "Cancelling threads after 1 second.");
             // DurationOf(CancelTasks, "Cancelling tasks after 1 second.");
-            CancellableSemaphores();
+            // CancellableSemaphores();
+
+            TaskStartTime();
 
             Console.WriteLine("Waiting for ENTER...");
 
@@ -914,5 +916,68 @@ namespace Primes
                 return numPrimes;
             }, "Threads using cancellable semaphores");
         }
+
+        // ======================================================
+
+        static void TaskStartTime()
+        {
+            Semaphore sem = new Semaphore(0, Int32.MaxValue);
+            int numProcs = 20; //  Environment.ProcessorCount;
+            var queue = new ConcurrentQueue<int>();
+            int numPrimes = 0;
+            List<Task> tasks = new List<Task>();
+            DateTime start = DateTime.Now;
+
+            for (int i = 0; i < numProcs; i++)
+            {
+                int tnum = i;
+                tasks.Add(Task.Run(() =>
+                {
+                    lock (sem)
+                    {
+                        Console.WriteLine("Starting task " + tnum + " at " + (DateTime.Now - start).TotalSeconds);
+                    }
+
+                    while (true)
+                    {
+                        sem.WaitOne();
+
+                        if (queue.TryDequeue(out int n))
+                        {
+                            if (n == 0)
+                            {
+                                break;
+                            }
+
+                            if (IsPrime(n))
+                            {
+                                Interlocked.Increment(ref numPrimes);
+                            }
+                        }
+                    }
+                }));
+            }
+
+            DurationOf(() =>
+            {
+                Enumerable.Range(2, MAX).ForEach(n =>
+                {
+                    queue.Enqueue(n);
+                    sem.Release();
+                });
+
+                for (int i = 0; i < numProcs; i++)
+                {
+                    queue.Enqueue(0);
+                }
+
+                sem.Release(numProcs);
+
+                Task.WaitAll(tasks.ToArray());
+
+                return numPrimes;
+            }, "Threads using semaphores");
+        }
+
     }
 }
