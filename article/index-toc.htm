@@ -1,0 +1,1889 @@
+<html>
+
+<head>
+<meta http-equiv="Content-Language" content="en-us">
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+<title>Everything Threading</title>
+</head>
+
+<body>
+
+<p>Everything Threading</p>
+<p>A discussion of various approaches to threading and discussing of locks, 
+mutexes, semaphores, 
+concurrent collections, work queues, threads, PLINQ, TPL, exception 
+handling, and cancellation tokens. </p>
+<h2>Table of Contents</h2><ul>
+<li><a href="#Introduction0">Introduction</a></li>
+<ul>
+<li><a href="#WhatIsaThread1">What Is a Thread?</a></li>
+<ul>
+<li><a href="#WhatisaFiber2">What is a Fiber?</a></li>
+<li><a href="#CooperativeMultitaskingvs.PreemptiveMultitasking3">Cooperative Multitasking vs. Preemptive Multitasking</a></li>
+</ul>
+<li><a href="#CPUBoundThreadsvs.I/OBoundThreads4">CPU Bound Threads vs. I/O Bound Threads</a></li>
+<li><a href="#ComingUpWithaGoodThreadExample5">Coming Up With a Good Thread Example</a></li>
+<li><a href="#TheTimingAlgorithm6">The Timing Algorithm</a></li>
+<li><a href="#Locks7">Locks</a></li>
+<li><a href="#AHelperMethodfortheBruteForceAlgorithm8">A Helper Method for the Brute Force Algorithm</a></li>
+</ul>
+<li><a href="#BruteForceAlgorithm9">Brute Force Algorithm</a></li>
+<li><a href="#ThreadedTheBruteForceAlgorithm10">Threaded The Brute Force Algorithm</a></li>
+<ul>
+<li><a href="#ThreadJoins11">Thread Joins</a></li>
+<li><a href="#BackgroundThreads12">Background Threads</a></li>
+<li><a href="#ThreadParameters13">Thread Parameters</a></li>
+<li><a href="#AvoidingCastingtheObjectParameterWithaLambdaExpression14">Avoiding Casting the Object Parameter With a Lambda Expression</a></li>
+<li><a href="#UsingtheThreadStartDelegateisTimeCostly15">Using the ThreadStart Delegate is Time Costly!</a></li>
+</ul>
+<li><a href="#BalancingtheBruteForceAlgorithmThreads16">Balancing the Brute Force Algorithm Threads</a></li>
+<ul>
+<li><a href="#AskingforWorkvs.TellingtheThreadWhatWorktoDo17">Asking for Work vs. Telling the Thread What Work to Do</a></li>
+<li><a href="#InterlockedandAtomic18">Interlocked and Atomic</a></li>
+</ul>
+<li><a href="#More&quot;Modern&quot;WaysofWorkingwithThreads19">More &quot;Modern&quot; Ways of Working with Threads</a></li>
+<ul>
+<li><a href="#AsParallel20">AsParallel</a></li>
+<li><a href="#Task.Run21">Task.Run</a></li>
+<li><a href="#Usingawait22">Using await</a></li>
+<li><a href="#UsingawaitinWinFormApplications23">Using await in WinForm Applications</a></li>
+<ul>
+<li><a href="#TaskInitialization24">Task Initialization</a></li>
+<li><a href="#CreatingEachTask25">Creating Each Task</a></li>
+</ul>
+</ul>
+<li><a href="#SemaphoresandQueuingWork26">Semaphores and Queuing Work</a></li>
+<li><a href="#Mutexes,Locks,andSemaphores27">Mutexes, Locks, and Semaphores</a></li>
+<li><a href="#ExceptionHandling28">Exception Handling</a></li>
+<ul>
+<li><a href="#ExceptionsHandlingandtheThreadClass29">Exceptions Handling and the Thread Class</a></li>
+<li><a href="#ExceptionHandlingwithTask30">Exception Handling with Task</a></li>
+<li><a href="#DoNOTuseasyncvoid31">Do NOT use async void!</a></li>
+</ul>
+<li><a href="#AwaitableThreads-AHybridApproachusingTaskCompletionSource32">Awaitable Threads - A Hybrid Approach using TaskCompletionSource</a></li>
+<li><a href="#CancelingThreadsandTasks33">Canceling Threads and Tasks</a></li>
+<ul>
+<li><a href="#CancelingThreads34">Canceling Threads</a></li>
+<li><a href="#CancelingTasks35">Canceling Tasks</a></li>
+<ul>
+<li><a href="#GracefullyCanceltheTask36">Gracefully Cancel the Task</a></li>
+<li><a href="#CalltheToken'sThrowIfCancellationRequested37">Call the Token's ThrowIfCancellationRequested</a></li>
+<li><a href="#ThrowingOurOwnOperationCanceledException38">Throwing Our Own OperationCanceledException</a></li>
+</ul>
+<li><a href="#CancelingThreadsAwaitingonaSemaphore39">Canceling Threads Awaiting on a Semaphore</a></li>
+</ul>
+<li><a href="#TheThreadPoolClassandCPU-BoundWork40">The ThreadPool Class and CPU-Bound Work</a></li>
+<ul>
+<li><a href="#MoreThreadsthanCores41">More Threads than Cores</a></li>
+<li><a href="#MoreTasksthanCores42">More Tasks than Cores</a></li>
+</ul>
+<li><a href="#Conclusion43">Conclusion</a></li>
+<ul>
+<li><a href="#OtherReading44">Other Reading</a></li>
+</ul>
+<li><a href="#Footnotes45">Footnotes</a></li>
+</ul>
+
+<h2><a name="Introduction0">Introduction</a></h2>
+<p>I was recently asked to provide some training on how threads are used in C#.&nbsp; 
+What I thought would be a fairly simple discussions turned into a detailed analysis 
+of different approaches to threading and important topics such as canceling 
+tasks and exception handling.&nbsp; So much for applying my 30+ years of 
+experience in judging the scope of a project, even if the &quot;project&quot; is an 
+article!&nbsp; What's new here is that while 
+this has all been discussed before, I'm hoping that this article provides some 
+interesting insights and coverage of the topic that perhaps hasn't been done 
+before in one article.&nbsp; Threading, tasks, cancellation, exceptions, and so 
+forth is a <i>huge</i> topic, whole books have been written on the subject.&nbsp; 
+This article presents an incomplete but hopefully concise overview.&nbsp; There 
+are lots of examples and the focus is on the essentials that you need to know 
+about 90% of the time rather than all the other extraneous stuff you might need 
+the remaining 10% of the time.</p>
+<h3><a name="WhatIsaThread1">What Is a Thread?</a></h3>
+<p>I suppose I should start with a brief description of what a thread is, 
+although quite frankly, I'm assuming you actually know what a thread is.&nbsp; 
+But, if someone asked you &quot;what is a thread?&quot; would you be able to provide a 
+concise and correct definition?&nbsp; Wikipedia<sup>11</sup> defines a thread 
+as: &quot;...a thread of execution is the smallest sequence of programmed 
+instructions that can be managed independently by a scheduler, which is 
+typically a part of the operating system.&quot;</p>
+<p>So, firstly, the term &quot;thread&quot; is actually shorthand for &quot;thread of 
+execution.&quot;&nbsp; Secondly, it incorporates the concept of a scheduler that 
+switches between &quot;sequences of programmed instructions.&quot;&nbsp; This sample 
+chapter<sup>12</sup> of <i>Windows Internals, 5th Edition</i>,&nbsp; is a highly 
+technical description of the scheduler in Windows (note this sample chapter was 
+written in 2009, the book <i>Windows Internals</i> is now on the 7th edition.)</p>
+<h4><a name="WhatisaFiber2">What is a Fiber?</a></h4>
+<p>Again, according to Wikipedia<sup>13</sup>: &quot;...fibers use cooperative 
+multitasking while threads use preemptive multitasking.&quot;</p>
+<h4><a name="CooperativeMultitaskingvs.PreemptiveMultitasking3">Cooperative Multitasking vs. Preemptive Multitasking</a></h4>
+<p>Cooperative Multitasking: &quot;is a style of computer multitasking in which the 
+operating system never initiates a context switch from a running process to 
+another process. Instead, processes voluntarily yield control periodically or 
+when idle or logically blocked in order to enable multiple applications to be 
+run concurrently.&quot;<sup>14</sup> </p>
+<p>Preemptive Multitasking: &quot;...involves the use of an interrupt mechanism which 
+suspends the currently executing process and invokes a scheduler to determine 
+which process should execute next. Therefore, all processes will get some amount 
+of CPU time at any given time.&quot;<sup>15</sup></p>
+<h3><a name="CPUBoundThreadsvs.I/OBoundThreads4">CPU Bound Threads vs. I/O Bound Threads</a></h3>
+<p>In broad terms, there are two kinds of threads, or tasks.&nbsp; CPU-bound 
+tasks (or threads) refers to code that is executed 100% on the local CPU <i>and</i> 
+that code doesn't wait for anything else.&nbsp; By &quot;anything else&quot;, we mean a 
+variety of things:</p>
+<ul>
+	<li>hardware interrupts (you usually don't have to deal with things at this 
+	level anymore)</li>
+	<li>completion of requests to remote servers (very common -- requesting data 
+	from a database and calling a web API are two examples)</li>
+	<li>waiting on another thread (fairly common)</li>
+	<li>waiting on an I/O completion event (usually refers to writing data as a 
+	stream to a hardware device or reading data in as a stream from a hardware 
+	device, such as the serial port stream class<sup>18</sup>.</li>
+</ul>
+<p>An I/O bound thread or task ins the opposite -- while it might do some 
+processing, it most likely spends most of its time waiting for something else to 
+signal that data is ready to be processed.&nbsp; The &quot;something else&quot; is the 
+list above.</p>
+<h3><a name="ComingUpWithaGoodThreadExample5">Coming Up With a Good Thread Example</a></h3>
+<p>The first problem of course is coming up with a good example where the work 
+is capable of being broken up into isolated chunks and that takes a reasonable 
+amount of computational time so you can really see the difference in approaches.&nbsp; 
+I chose a brute force &quot;is the number prime&quot; algorithm.&nbsp; And I truly mean 
+brute force:</p>
+<pre>static bool IsPrime(int n)
+{
+  bool ret = true;
+  for (int i = 2; i &lt;= n / 2 &amp;&amp; ret; ret = n % i++ != 0);
+  return ret;
+}</pre>
+<p>Yes, there actually is no content to the for loop -- it does end with a <code>;</code> 
+because the look terminates when ret becomes false.</p>
+<p>Obviously, you would NEVER write a prime number calculation this way (a much 
+better approach is the 
+<a href="https://en.wikipedia.org/wiki/Sieve_of_Eratosthenes">Sieve of 
+Eranthoses</a>) but this algorithm has the advantage of:</p>
+<ul>
+	<li>Being slow.</li>
+	<li>Returning a true/false for each number.</li>
+</ul>
+<p>This is an advantage when writing an article about the nuances of threads!</p>
+<h3><a name="TheTimingAlgorithm6">The Timing Algorithm</a></h3>
+<p>To time things, I wrote a simple &quot;time how long this function takes&quot;:</p>
+<pre>static void DurationOf(Func&lt;int&gt; action, string section)
+{
+  var start = DateTime.Now;
+  int numPrimes = action();
+  var stop = DateTime.Now;
+
+  lock (locker)
+  {
+    Console.WriteLine(section);
+    Console.WriteLine(&quot;Number of primes is : &quot; + numPrimes);
+    Console.WriteLine(&quot;Total seconds = &quot; + (stop - start).TotalSeconds);
+  }
+}</pre>
+<p>It's rather tailored to the examples here in this article.</p>
+<h3><a name="Locks7">Locks</a></h3>
+<p>Let's talk about locks right now.&nbsp; Notice in the above code the <code>lock</code> 
+statement.&nbsp; The <code>lock</code> ensures that each <code>Console.WriteLine</code> is not 
+&quot;interrupted&quot; by another thread also writing to the console.&nbsp; A 
+lock statement requires an <code>object</code> that all threads can access which acts as the 
+synchronization object between threads.&nbsp; Typically, the synchronization 
+object is a root level <code>Object</code>:</p>
+<pre>static object locker = new object();</pre>
+<p align="f">Historically, the concept of a lock was called a &quot;critical 
+section&quot;, meaning that only one thread could enter the code at a time.&nbsp; 
+Native Windows programmers will be familiar with the CRITICAL_SECTION<sup>4</sup> 
+structure and related methods.</p>
+<p><img border="0" src="important.png" width="38" height="32"> Locks can be dangerous:</p>
+<ul>
+	<li>If what you're performing in the lock takes a long time, your thread 
+	will lose performance as it waits for the lock to be released by another 
+	thread.</li>
+	<li>It's fairly easy to create a deadlock in which thread A is waiting for 
+	the lock to be released, and thread B, currently inside the lock, is waiting 
+	for thread A to finish some task.</li>
+</ul>
+<p>The body of a lock statement should never include anything that waits for a 
+thread to do some work.&nbsp; However, locks are useful when doing simple 
+synchronization, particularly of debug output or synchronizing access to a 
+physical &quot;thing&quot; like a hardware port.&nbsp; Otherwise, if there's a <code>lock</code> in 
+your code, it's probably a big red flag.</p>
+<h3><a name="AHelperMethodfortheBruteForceAlgorithm8">A Helper Method for the Brute Force Algorithm</a></h3>
+<p>This is called by several of the variations of brute force algorithm that are 
+to demonstrate threading, so it's useful to implement it once.</p>
+<pre>static int NumPrimes(int start, int end)
+{
+  int numPrimes = 0;
+  for (int i = start; i &lt; end; numPrimes += IsPrime(i++) ? 1 : 0);
+  return numPrimes;
+}</pre>
+<p>Yes, another one of those do-nothing loops where the work is done in the iterator portion of the for loop. </p>
+<h2><a name="BruteForceAlgorithm9">Brute Force Algorithm</a></h2>
+<p>Here we want to find how many primes there are between 2 and 500,000.&nbsp; I 
+chose 500,000 as the maximum as it takes about 35 seconds on my machine to 
+determine that there are 41,538 prime numbers.&nbsp; </p>
+<p>Calling the algorithm:</p>
+<pre>DurationOf(BruteForce, &quot;Brute force:&quot;);</pre>
+<p>The implementation:</p>
+<pre>static int BruteForce()
+{
+  int numPrimes = NumPrimes(2, MAX);
+
+  return numPrimes;
+}
+</pre>
+<p>The results:</p>
+<pre>Brute force:
+Number of primes is : 41538
+Total seconds = 30.1119874</pre>
+<h2><a name="ThreadedTheBruteForceAlgorithm10">Threaded The Brute Force Algorithm</a></h2>
+<p>Let's take a stab at optimizing this by breaking the work up into chunks and 
+giving each thread (up to the number of processors) the chunk to work on.&nbsp; 
+We'll evenly divide the chunks.&nbsp; The astute reader will realize that is not 
+optimal, but we'll illustrate why and discuss one of the important things about 
+multi-threading -- make sure your work load is evenly distributed!</p>
+<p>Keep in mind that what I'm about to show you is rather old school!</p>
+<p>Calling the algorithm:</p>
+<pre>DurationOf(ThreadedBruteForce, &quot;Threaded brute force:&quot;);</pre>
+<p>The implementation:</p>
+<p>First, setting up the threads:</p>
+<pre>static int ThreadedBruteForce()
+{
+  List&lt;(Thread thread, int threadNum, int start, int end)&gt; threads = new List&lt;(Thread thread, int threadNum, int start, int end)&gt;();
+
+  int numProcs = Environment.ProcessorCount;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    int start = Math.Max(1, i * (MAX / numProcs)) + 1;
+    int end = (i + 1) * (MAX / numProcs);
+    var thread = new Thread(new ParameterizedThreadStart(BruteForceThread));
+    thread.IsBackground = true;
+    threads.Add((thread, i, start, end));
+  }
+
+  totalNumPrimes = 0;
+  threads.ForEach(t =&gt; t.thread.Start((t.threadNum, t.start, t.end)));
+  threads.ForEach(t =&gt; t.thread.Join());
+
+  return totalNumPrimes;
+}</pre>
+<p>The worker thread:</p>
+<pre>static void BruteForceThread(object parms)
+{
+  (int threadNum, int start, int end) parm = (ValueTuple&lt;int, int, int&gt;)parms;
+  DurationOf(() =&gt;
+  {
+    int numPrimes = NumPrimes(parm.start, parm.end);
+    Interlocked.Add(ref totalNumPrimes, numPrimes);
+    return numPrimes;
+  }, $&quot;Thread {parm.threadNum} processing {parm.start} to {parm.end}&quot;);
+}</pre>
+<p>The results:</p>
+<pre>Thread 0 processing 2 to 125000
+Number of primes is : 11734
+Total seconds = 3.8519907
+Thread 1 processing 125001 to 250000
+Number of primes is : 10310
+Total seconds = 9.0879819
+Thread 2 processing 250001 to 375000
+Number of primes is : 9860
+Total seconds = 12.963975
+Thread 3 processing 375001 to 500000
+Number of primes is : 9634
+Total seconds = 16.4079704
+Threaded brute force:
+Number of primes is : 41538
+Total seconds = 16.4119713</pre>
+<p>OK, cool, we've taken a 35 second process and reduced it to 16 seconds.&nbsp; 
+But notice that the workload is not evenly distributed.&nbsp; The threads take 
+different times.&nbsp; The reason should be obvious -- the larger the number 
+we're trying to determine is prime or not, the more divisions need to be 
+executed.&nbsp; So for numbers at the lower range, the thread finishes faster:</p>
+<pre>Thread 0 processing 2 to 125000
+Number of primes is : 11734
+Total seconds = 3.8519907</pre>
+<p>vs:</p>
+<pre>Thread 3 processing 375001 to 500000
+Number of primes is : 9634
+Total seconds = 16.4079704</pre>
+<h3><a name="ThreadJoins11">Thread Joins</a></h3>
+<p>Notice once the threads have been started, there is this statement:</p>
+<pre>threads.ForEach(t =&gt; t.thread.Join());</pre>
+<p>Here the Join method suspends execution until the thread on which Join is 
+called has finished.&nbsp; </p>
+<p><img border="0" src="important.png" width="38" height="32"> Be aware:</p>
+<ul>
+	<li>This can cause the current thread to indefinitely suspend its operation.</li>
+	<li>You wouldn't do this on a UI thread as the UI will no longer respond to 
+	user actions.</li>
+</ul>
+<h3><a name="BackgroundThreads12">Background Threads</a></h3>
+<p>Notice this statement:</p>
+<pre>thread.IsBackground = true;</pre>
+<p>Telling the thread that it is a background thread ensures that it is killed 
+when the application exits.&nbsp; </p>
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; If you have a thread that is not a background 
+thread and you close the application or it in some other way terminates, the 
+thread will continue to exist (and run) as a process.</p>
+<h3><a name="ThreadParameters13">Thread Parameters</a></h3>
+<p>Notice this statement:</p>
+<pre>var thread = new Thread(new ParameterizedThreadStart(BruteForceThread));</pre>
+<p>Here we are setting up the method that implements the thread to accept 
+parameters.&nbsp; The signature must be <code>[methodName](object parameters)</code>, 
+which requires that you cast the object to the same type being passed in when 
+the thread is started:</p>
+<p>Starting the thread (I'm using a value tuple as the parameter):</p>
+<pre>threads.ForEach(t =&gt; t.thread.Start((t.threadNum, t.start, t.end)));</pre>
+<p>Casting the object (a value tuple in this case) in the method implementing 
+the thread:</p>
+<pre>(int threadNum, int start, int end) parm = (ValueTuple&lt;int, int, int&gt;)parms;</pre>
+<h3><a name="AvoidingCastingtheObjectParameterWithaLambdaExpression14">Avoiding Casting the Object Parameter With a Lambda Expression</a></h3>
+<p><img border="0" src="usefulInfo.png" width="38" height="32">&nbsp; You can avoid the cast using an lambda expression which provides closure for 
+the current parameter values, like this:</p>
+<pre>for (int i = 0; i &lt; numProcs; i++)
+{
+  int j = i;
+  int start = Math.Max(1, i * (MAX / numProcs)) + 1;
+  int end = (i + 1) * (MAX / numProcs);
+  var thread = new Thread(() =&gt; BruteForceThread(j, start, end));
+  thread.IsBackground = true;
+  threads.Add((thread, i, start, end));
+}</pre>
+<p>Notice&nbsp;<code>int j = i;</code> is required for the closure -- otherwise 
+the thread number (not to be confused with the thread ID) is always the number 
+of processors (4 in my examples, usually.)</p>
+<p>Also notice that this works but is not necessary:</p>
+<pre>var thread = new Thread(new ThreadStart(() =&gt; BruteForceThread(j, start, end)));</pre>
+<p>Why?&nbsp; Because <code>ThreadStart</code> is defined as a delegate: <code>public delegate void ThreadStart();</code>so a 
+lambda expression is perfectly valid.</p>
+<p>The method implementing the thread now can accept parameters in the method 
+signature, avoiding the cast:</p>
+<pre>static void BruteForceThread(int threadNum, int start, int end)</pre>
+<h3><a name="UsingtheThreadStartDelegateisTimeCostly15">Using the ThreadStart Delegate is Time Costly!</a></h3>
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; These two lines of code are NOT equivalent:</p>
+<pre>var thread = new Thread(() =&gt; BruteForceThread(j, start, end));</pre>
+<p>vs.</p>
+<pre>var thread = new Thread(new ThreadStart(() =&gt; BruteForceThread(j, start, end)));</pre>
+<p>Notice the timing difference in the second version:</p>
+<pre>Thread 0 processing 2 to 125000
+Number of primes is : 11734
+Total seconds = 4.3607559
+Thread 1 processing 125001 to 250000
+Number of primes is : 10310
+Total seconds = 10.5416041
+Thread 2 processing 250001 to 375000
+Number of primes is : 9860
+Total seconds = 14.9788427
+Thread 3 processing 375001 to 500000
+Number of primes is : 9634
+Total seconds = 19.2458287
+Threaded brute force:
+Number of primes is : 41538
+Total seconds = 19.2458287</pre>
+<p>Roughly: </p>
+<ul>
+	<li>thread 0 take .5 seconds longer</li>
+	<li>thread 1 and 2 take 1.5 seconds longer</li>
+	<li>thread 3 takes almost 3 seconds longer</li>
+</ul>
+<p>This isn't just an anomaly, this is a consistent repeatable difference.&nbsp; 
+I have not found any discussion of why this is the case.</p>
+<h2><a name="BalancingtheBruteForceAlgorithmThreads16">Balancing the Brute Force Algorithm Threads</a></h2>
+<p><img border="0" src="cpua1.png" width="440" height="248"></p>
+<p>Notice that the worker threads are not very balanced -- the work load <i>
+looks</i> like it is evenly distributed because we're giving each thread 1/n<sup>th</sup> 
+(where n is the number of processors) of the work, but due to the nature of the 
+work, CPU cores are not efficiently used -- the thread with the lowest number 
+range finishes much sooner than the thread with the highest number range.</p>
+<h3><a name="AskingforWorkvs.TellingtheThreadWhatWorktoDo17">Asking for Work vs. Telling the Thread What Work to Do</a></h3>
+<p><img border="0" src="key-small.jpg" width="94" height="33">&nbsp;A clue as to whether your threads are optimized is this: are you telling your 
+threads what work to do, or are your threads requesting work?&nbsp; In the 
+threaded brute force algorithm above, we are <i>telling</i> the thread what work 
+it should be doing.&nbsp; In this next iteration, the thread will be <i>asking</i> 
+for work when it is available.</p>
+<p>Calling the algorithm</p>
+<pre>DurationOf(ThreadedGetNextWorkItemBruteForce, &quot;Threaded get next work item brute force:&quot;);</pre>
+<p>The implementation:</p>
+<pre>static int ThreadedGetNextWorkItemBruteForce()
+{
+  List&lt;(Thread thread, int threadNum)&gt; threads = new List&lt;(Thread thread, int threadNum)&gt;();
+  int numProcs = Environment.ProcessorCount;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var thread = new Thread(new ParameterizedThreadStart(NextWorkItemBruteForceThread));
+    thread.IsBackground = true;
+    threads.Add((thread, i));
+  }
+
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  threads.ForEach(t =&gt; t.thread.Start(t.threadNum));
+  threads.ForEach(t =&gt; t.thread.Join());
+
+  return totalNumPrimes;
+}</pre>
+<p>The worker thread:</p>
+<pre>static void NextWorkItemBruteForceThread(object parms)
+{
+  int threadNum = (int)parms;
+  DurationOf(() =&gt;
+  {
+    int numPrimes = 0;
+    int n;
+
+    while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)
+    {
+      if (IsPrime(n))
+      {
+        ++numPrimes;
+      }
+    }
+
+    Interlocked.Add(ref totalNumPrimes, numPrimes);
+
+    return numPrimes;
+  }, $&quot;Thread: {threadNum}&quot;);
+}</pre>
+<p>The results:</p>
+<p><img border="0" src="cpua2.png" width="434" height="245"></p>
+<pre>Thread: 3
+Number of primes is : 10446
+Total seconds = 13.2079996
+Thread: 2
+Number of primes is : 10378
+Total seconds = 13.2079996
+Thread: 0
+Number of primes is : 10437
+Total seconds = 13.2079996
+Thread: 1
+Number of primes is : 10277
+Total seconds = 13.2079996
+Threaded get next work item brute force:
+Number of primes is : 41538
+Total seconds = 13.2079996</pre>
+<p>Notice now that each thread actually runs for exactly the same amount of time 
+(that was actually a fluke of that particular test run, they do vary ever so 
+slightly.)&nbsp; Also notice we're using our threads efficiently now -- we've 
+shaved 6 seconds off the processing time because each core is fully utilized, 
+and the core utilization is much more efficient.</p>
+<h3><a name="InterlockedandAtomic18">Interlocked and Atomic</a></h3>
+<p>Notice these two lines:</p>
+<pre>while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)
+...
+Interlocked.Add(ref totalNumPrimes, numPrimes);</pre>
+<p>The way this worker thread requests work is to simply get the next number to 
+process -- there's no queuing of work, semaphores, or other complexity.&nbsp; 
+However, in order to get the next number and update the total count, each thread 
+must ensure that it momentarily blocks the other threads.&nbsp; Otherwise, 
+another thread might get exactly the same number or the total might be updated 
+simultaneously, resulting in an incorrect count.&nbsp; </p>
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; .NET has an <code>Interlocked</code> 
+class (read more
+<a href="https://msdn.microsoft.com/en-us/library/system.threading.interlocked(v=vs.110).aspx">
+here</a>) that ensures that the operation is performed atomically, meaning that, 
+even if several bytes of data are being changed, the operation is treated as a 
+single, synchronous, change.&nbsp; Essentially, it's like writing a <code>lock</code> 
+statement around the operation, however it is much more performant because the 
+generated IL code (and ultimately the assembly code) can take advantage of CPU 
+instructions to exchange the value in memory because you're doing something very 
+specific.&nbsp; Using a <code>lock</code> statement, the compiler has no idea what you're 
+really doing and can't optimize the code for you.&nbsp; In fact, the methods 
+that <code>Interlocked</code> implements closely match the actual Intel CPU instructions<sup>1</sup> that are 
+atomic and can therefore be locked.</p>
+<h2><a name="More&quot;Modern&quot;WaysofWorkingwithThreads19">More &quot;Modern&quot; Ways of Working with Threads</a></h2>
+<p>Nowadays, the junior programmer probably isn't even instructed regarding the 
+<code>Thread</code> class and is instead taught one or more of the various other ways to fire 
+off a thread.&nbsp; Learning about the underlying Thread class is however 
+important because there are situations when you absolutely want to manage the 
+thread yourself rather than letting the .NET framework manage the thread for 
+you, particularly threads that interact with .NET's <code>ThreadPool</code> (more on that 
+later.)&nbsp; Here are the most common options:</p>
+<ul>
+	<li>AsParallel - a PLINQ (Parallel LINQ) extension on an Enumerable</li>
+	<li>Task.Run - forcing an asynchronous method</li>
+	<li>Task.Factory.StartNew<sup>8</sup> - equivalent to Task.Run but with some 
+	defaults:<ul>
+	<li>no cancellation token</li>
+	<li>children cannot attach</li>
+	<li>default task scheduler</li>
+</ul>
+	</li>
+	<li>await - calling an asynchronous method with a continuation</li>
+	<li>QueueUserWorkItem&nbsp; - queues work</li>
+	<li>BackgroundWorker</li>
+</ul>
+<p>Most of these approaches use the .NET's <code>ThreadPool</code> with the potential 
+exception of the &quot;await&quot; syntax in which you have more control over how the task 
+is set up.&nbsp; Each also has its nuances regarding:</p>
+<ul>
+	<li>exception handling</li>
+	<li>cancellation tokens</li>
+	<li>progress reporting</li>
+	<li>best practices with <code>ThreadPool</code></li>
+</ul>
+<p>One really needs to understand these nuances and how they affect performance 
+and error handling.</p>
+<h3><a name="AsParallel20">AsParallel</a></h3>
+<p><code>AsParallel</code> is one of several query extension methods in the Parallel LINQ (<a href="https://docs.microsoft.com/en-us/dotnet/standard/parallel-programming/introduction-to-plinq">PLINQ</a>) 
+library.&nbsp; I'm not going to get into the details of the various methods in 
+the <code>ParallelEnumerable</code> class, instead let's look at just <code>AsParallel</code>. </p>
+<p>Calling the algorithm:</p>
+<pre>DurationOf(AsParallelGetNextWorkItemBruteForce, &quot;AsParallel get next work item brute force:&quot;);</pre>
+<p>The implementation:</p>
+<pre>static int AsParallelGetNextWorkItemBruteForce()
+{
+  int totalNumPrimes = 0;
+
+  var nums = Enumerable.Range(2, MAX);
+  nums.AsParallel().ForAll(n =&gt;
+  {
+    if (IsPrime(n))
+    {
+      Interlocked.Increment(ref totalNumPrimes);
+    }
+  });
+
+  return totalNumPrimes;
+}</pre>
+<p>Note the code&nbsp;&nbsp; <code>nums.AsParallel().ForAll</code>, which 
+attempts, for each item in the enumerable, to execute in parallel the action 
+action declared in <code>ForAll.</code></p>
+<p>The results (don't compare this with the results above, currently I'm on a VM 
+that seems to run faster than my laptop natively):</p>
+<pre>AsParallel get next work item brute force:
+Number of primes is : 41538
+Total seconds = 11.7537395</pre>
+<p>Compare with the balanced brute force thread timing:</p>
+<pre>Thread: 1
+Number of primes is : 10326
+Total seconds = 11.7124344
+Thread: 2
+Number of primes is : 10517
+Total seconds = 11.7124344
+Thread: 0
+Number of primes is : 10502
+Total seconds = 11.7124344
+Thread: 3
+Number of primes is : 10193
+Total seconds = 11.7134212
+Threaded get next work item brute force:
+Number of primes is : 41538
+Total seconds = 11.7304613</pre>
+<p>So that's neat -- the timing is essentially identical.</p>
+<p><img border="0" src="note.png" width="24" height="32">&nbsp; Keep in 
+mind that <code>AsParallel.ForAll</code> is a synchronous operation -- code execution 
+continues after all the numbers have been processed.&nbsp; While the processing 
+itself is asynchronous, you application will be waiting for the <code>ForAll</code> to 
+finish.&nbsp; Mixing <code>AsParallel</code> with awaitable tasks (discussed next) is rather 
+of pointless.</p>
+<h3><a name="Task.Run21">Task.Run</a></h3>
+<p><code>Task.Run</code> is one of the ways to implement a task-based 
+asynchronous pattern<sup>3</sup> (TAP) quickly to create a worker thread.&nbsp; This is 
+an example of what is called a &quot;compute-bound&quot; task, meaning that the task is 
+performed by the CPU rather than the program waiting for a device (like a 
+fingerprint reader) or connection (to a database, for example) to return a 
+result.&nbsp; It's important to understand the difference between compute-bound io-bound tasks<sup>2</sup>, particularly with regards to threads managed by the 
+ThreadPool, which should not block for large periods of time</p>
+<p>Calling the algorithm:</p>
+<pre>DurationOf(TaskRunGetNextWorkItemBruteForce, &quot;Task.Run get next work item brute force:&quot;);</pre>
+<p>The implementation:</p>
+<pre>static int TaskRunGetNextWorkItemBruteForce()
+{
+  int numProcs = Environment.ProcessorCount;
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  List&lt;Task&gt; tasks = new List&lt;Task&gt;();
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var task = Task.Run(() =&gt; NextWorkItemBruteForceThread(i));
+    tasks.Add(task);
+  }
+
+  Task.WaitAll(tasks.ToArray());
+
+  return totalNumPrimes;
+}</pre>
+<p>Notice the <code>Task.WaitAll</code>, which is like&nbsp; thread <code>Join</code> -- the current 
+thread blocks until all tasks are complete.&nbsp; As with <code>Join</code>, use with 
+caution!&nbsp; Also notice that we can call the same method, <code>NextWorkItemBruteForceThread(i)</code>, that performs the 
+computation as we do in the balanced brute force thread setup routine.</p>
+<p>The results (again don't compare with the previous results, I'm running on a 
+different machine at the moment) - these compare quite well with <code>AsParallel</code> and 
+the balanced brute force algorithm.</p>
+<pre>Thread: 4
+Number of primes is : 10369
+Total seconds = 11.9374993
+Thread: 4
+Number of primes is : 10351
+Total seconds = 11.9374993
+Thread: 4
+Number of primes is : 10293
+Total seconds = 11.9374993
+Thread: 4
+Number of primes is : 10525
+Total seconds = 11.9374993
+Task.Run get next work item brute force:
+Number of primes is : 41538
+Total seconds = 11.953198</pre>
+<h3><a name="Usingawait22">Using await</a></h3>
+<p>This is a very simple example in which the above code is modified slightly to 
+use the <code>await</code> keyword.&nbsp; Using <code>await</code> (along with the <code>async</code> 
+keyword) has the following effect:</p>
+<ol>
+	<li>The method initiates the asynchronous process</li>
+<li>It then immediately returns to the caller</li>
+	<li>When the asynchronous process completes, code execution continues with 
+	the code immediately after the <code>await</code> statement.</li>
+</ol>
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; There's a few &quot;gotcha's&quot; in this.&nbsp; First, it is useful to be aware 
+of the context in which the continuation is executed.&nbsp; For WinForm 
+applications in which the <code>await</code> was called on the application thread 
+(the thread running the UI), execution 
+is marshaled to continue on the application (UI) thread.&nbsp; If you're running a 
+non-UI application, the continuation can occur on the same thread to which the 
+asynchronous method was assigned, or a new thread!&nbsp; This behavior is 
+controlled by the <code>SynchronizationContext</code><sup>5,6</sup> and discussion of this 
+class is beyond the scope of this article.&nbsp; There's a good Code Project 
+article series on the topic:
+<a href="https://www.codeproject.com/Articles/31971/Understanding-SynchronizationContext-Part-I">
+Part I</a>,
+<a href="https://www.codeproject.com/Articles/32113/Understanding-SynchronizationContext-Part-II">
+Part II</a>,
+<a href="https://www.codeproject.com/Articles/32119/Understanding-SynchronizationContext-Part-III">
+Part III</a>.</p>
+<p>Second, I find the mental gyrations of &quot;return to caller and continue later&quot; 
+to be difficult.&nbsp; The reason for this is that it's not obvious to the method performing the call 
+to an <code>async</code> method will return immediately.&nbsp; This is why the guidance on 
+these method names is to append them with &quot;Async&quot;.</p>
+<p>Third, the mental gyrations get even harder when there are nested <code>await</code> calls.</p>
+<p>Conversely, the <code>Task</code> class provides some really useful features, particularly 
+with regards to returning a result and passing exceptions back to you if an 
+exception occurs while executing the task.</p>
+<p>First, the implementation for the very simple example:</p>
+<pre>static int TaskAwaitGetNextWorkItemBruteForce()
+{
+  int numProcs = Environment.ProcessorCount;
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  List&lt;Task&gt; tasks = new List&lt;Task&gt;();
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var task = DoWorkAsync(i);
+    tasks.Add(task);
+  }
+
+  Task.WaitAll(tasks.ToArray());
+  
+  return totalNumPrimes;
+}
+
+static async Task DoWorkAsync(int threadNum)
+{
+  await Task.Run(() =&gt; NextWorkItemBruteForceThread(threadNum));
+}</pre>
+<p>Here, <code>DoWorkAsync</code> initiates the work and the <code>await</code> returns to the caller, 
+<code>TaskAwaitGetNextWorkItemBruteForce</code>.&nbsp; This example is 
+over-simplified because there is no continuation.&nbsp; Also notice that 
+<code>DoWorkAsync</code> returns a Task but there's no explicit <code>return myTask;</code> statement.&nbsp; 
+An <code>async</code> method can return a <code>Task&lt;TResult&gt;</code>, <code>Task</code>, <code>void</code>, or (C# 7) a type 
+implementing a public <code>GetAwaiter</code> method<sup>7</sup>.</p>
+<p>Let's look at a more useful example next -- here you'll see that we 
+can remove the global variables that <code>NextWorkItemBruteForceThread</code> 
+uses and instead return the result of the algorithm in the <code>TResult</code> 
+generic type.&nbsp; This also removes the <code>Interlocked</code> call: <code>Interlocked.Add(ref 
+totalNumPrimes, numPrimes)</code> which greatly improves the compartmentalization of 
+the thread.&nbsp; Instead, we'll compute the total number of primes by summing 
+the primes found by each asynchronous task.</p>
+<p>The algorithm implementation:</p>
+<pre>static int AwaitableBruteForceAlgorithm(object parms)
+{
+  int threadNum = (int)parms;
+  int numPrimes = 0;
+
+  DurationOf(() =&gt;
+  {
+    int n;
+
+    while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)
+    {
+      if (IsPrime(n))
+      {
+        ++numPrimes;
+      }
+    }
+
+    return numPrimes;
+  }, $&quot;Thread: {threadNum}&quot;);
+
+  return numPrimes;
+}</pre>
+<p>The implementation:</p>
+<pre>static int TaskAwaitGetNextWorkItemBruteForceWithReturn()
+{
+  int numProcs = Environment.ProcessorCount;
+  nextNumber = 1;
+  List&lt;Task&lt;int&gt;&gt; tasks = new List&lt;Task&lt;int&gt;&gt;();
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var task = DoWorkWithReturnAsync(i);
+    tasks.Add(task);
+  }
+
+  Task.WaitAll(tasks.ToArray());
+
+  return tasks.Sum(t =&gt; t.Result);
+}
+
+static async Task&lt;int&gt; DoWorkWithReturnAsync(int threadNum)
+{
+  return await Task.Run(() =&gt; AwaitableBruteForceAlgorithm(threadNum));
+}</pre>
+<p>Notice here that the <code>DoWorkWithReturnAsync</code> method now requires a <code>return</code> 
+keyword!&nbsp; Also, we're no longer using the global <code>totalNumPrimes</code>, as the 
+results of all the tasks, once their complete, is summed and returned.</p>
+<p>Let's make this example a wee bit more useful by adding a continuation that 
+indicates that the thread is complete, and see what happens.</p>
+<p>The implementation:</p>
+<pre>static int TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation()
+{
+  int numProcs = Environment.ProcessorCount;
+  nextNumber = 1;
+  List&lt;Task&lt;int&gt;&gt; tasks = new List&lt;Task&lt;int&gt;&gt;();
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+   Console.WriteLine(&quot;Starting thread &quot; + i + &quot; at &quot; + (DateTime.Now - start).TotalMilliseconds + &quot; ms&quot;);
+   var task = DoWorkWithReturnAsyncAndContinuation(i);
+    tasks.Add(task);
+  }
+
+  Task.WaitAll(tasks.ToArray());
+
+    return tasks.Sum(t =&gt; t.Result);
+}
+
+static async Task&lt;int&gt; DoWorkWithReturnAsyncAndContinuation(int threadNum)
+{
+  var t = await Task.Run(() =&gt; AwaitableBruteForceAlgorithm(threadNum));
+
+  lock (locker)
+  {
+    Console.WriteLine(&quot;Thread number &quot; + threadNum + &quot; finished.&quot;);
+  }
+
+  return t;
+}</pre>
+<p>The results:</p>
+<pre>Starting thread 0 at 0 ms
+Starting thread 1 at 0 ms
+Starting thread 2 at 0 ms
+Starting thread 3 at 0 ms
+Thread: 3
+Number of primes is : 10431
+Total seconds = 13.4916976
+Thread number 3 finished.
+Thread: 2
+Number of primes is : 10205
+Total seconds = 13.4916976
+Thread number 2 finished.
+Thread: 0
+Number of primes is : 10442
+Total seconds = 13.4916976
+Thread number 0 finished.
+Thread: 1
+Number of primes is : 10460
+Total seconds = 13.4916976
+Thread number 1 finished.
+await Task.Run get next work item with return brute force and continuation:
+Number of primes is : 41538
+Total seconds = 13.5073256</pre>
+<p>So this code should strike you as non-intuitive:</p>
+<pre>static async Task&lt;int&gt; DoWorkWithReturnAsyncAndContinuation(int threadNum)
+{
+  var t = await Task.Run(() =&gt; AwaitableBruteForceAlgorithm(threadNum));
+
+  lock (locker)
+  {
+    Console.WriteLine(&quot;Thread number &quot; + threadNum + &quot; finished.&quot;);
+  }
+
+  return t;
+}</pre>
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; The await should return to the caller.&nbsp; It does -- we know this because 
+we note that the tasks are created all at once -- there is no delay between the 
+start times.&nbsp; But what does the method return?&nbsp; It returns a <code>Task&lt;int&gt;</code>, 
+and the return statement is <i>after</i> the continuation.&nbsp; It's <i>not 
+part of the continuation</i> which, when you think about it, can't return 
+anything anyways!&nbsp; Furthermore, <code>t</code>, when used <i>inside the 
+continuation</i> is the return (an <code>int</code>) of the method we're awaiting upon.&nbsp; 
+So if we wanted to output the count of primes: we would write:</p>
+<pre>Console.WriteLine(&quot;Count = &quot; + t);</pre>
+<p>and <i>not</i> <code>t.Result</code>.&nbsp; But in the caller that receives 
+<code>Task&lt;int&gt;</code>, we have to use <code>t.Result</code>.&nbsp; Wow.&nbsp; 
+Just Wow, I say.&nbsp; And yes, if you're task creates another task, the outer 
+return type is <code>Task&lt;Task&gt;</code>.&nbsp; If it's a three layer nested task, the return 
+type will be <code>Task&lt;Task&lt;Task&gt;&gt;&gt;</code>.&nbsp; See what I mean by mind warping?</p>
+<p>console output (your mileage will vary):</p>
+<pre>Starting thread 0 at 0 ms
+Starting thread 1 at 6.3902 ms
+Starting thread 2 at 6.3902 ms
+Starting thread 3 at 6.3902 ms
+Thread: 0
+Number of primes is : 10428
+Total seconds = 13.3906041
+Thread number 0 finished.
+Count = 10428
+Thread: 2
+Number of primes is : 10270
+Total seconds = 13.3916069
+Thread: 3
+Number of primes is : 10382
+Total seconds = 13.3916069
+Thread number 3 finished.
+Count = 10382
+Thread: 1
+Number of primes is : 10458
+Total seconds = 13.3916069
+Thread number 1 finished.
+Count = 10458
+Thread number 2 finished.
+Count = 10270
+await Task.Run get next work item with return brute force and continuation:
+Number of primes is : 41538
+Total seconds = 13.4070216</pre>
+<h3><a name="UsingawaitinWinFormApplications23">Using await in WinForm Applications</a></h3>
+<p>In the above console application, <code>DurationOf</code> is a thread blocking method, 
+waiting until all the tasks complete.&nbsp; This is completely unsuitable in a 
+WinForm application:</p>
+<ol>
+	<li>Blocking the main UI thread prevents the application's message pump from 
+	processed Windows messages.</li>
+	<li>Calls to <code>Invoke</code> for performing a UI update from a non-UI thread use the 
+	application's message pump to marshal the call onto the main UI thread.</li>
+	<li>When the main UI thread is blocked, messages aren't processed, and a 
+	deadlock occurs between the blocked UI thread and the thread requesting the 
+	<code>Invoke</code>.</li>
+	<li>Calls to <code>BeginInvoke</code> perform the UI thread asynchronously, so should not 
+	deadlock.</li>
+</ol>
+<p>However:</p>
+<ol>
+	<li>The whole point is that it is desirable to use await and tasks <i>
+	without having to call Invoke or BeginInvoke.</i>&nbsp; </li>
+	<li>The await <i>should return control to the UI thread</i>.&nbsp; </li>
+	<li>The only time we would need to use <code>Invoke</code> or <code>BeginInvoke</code> is if we're 
+	updating the UI in the non-UI thread, which ought to be avoided if possible.</li>
+	<li>And most importantly, the main UI thread should not be blocked!</li>
+</ol>
+<p>To achieve this, special care also must be taken with regards to how async 
+methods are nested, so that the await returns immediately to the desired caller.&nbsp; 
+I consider this an important point -- using async and await requires that your 
+method call hierarchy has the correct structure to handle the immediate return 
+to the caller.</p>
+<h4><a name="TaskInitialization24">Task Initialization</a></h4>
+<p>We're going to start the threads as soon as the form is shown, but this <i>
+cannot block the UI thread:</i></p>
+<pre>public Form1()
+{
+  InitializeComponent();
+  Shown += OnFormShown;
+}
+
+private async void OnFormShown(object sender, EventArgs e)
+{
+  List&lt;Task&lt;int&gt;&gt; tasks = TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation();
+  await Task.WhenAll(tasks);
+  int numPrimes = tasks.Sum(t =&gt; t.Result);
+  tbOutput.AppendLine(&quot;Number of primes is : &quot; + numPrimes);
+}</pre>
+<p>In <code>OnFormShown</code>, the method that starts all the tasks 
+(<code>TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation</code>) returns those 
+tasks.&nbsp; Then we wait until this tasks all complete with 
+<code>Task.WhenAll(tasks)</code>.&nbsp; We <i>await</i> this, which immediately exits out of 
+the <code>OnFormShown</code> method -- our UI thread is NOT blocked!&nbsp; Note 
+the difference between <code>Task.WhenAll</code> vs. <code>Task.WaitAll</code>!&nbsp; Once 
+the tasks complete, the <i>continuation</i> executes, summing the results of 
+each task and displaying the total number of primes found.&nbsp; Because the 
+synchronization context is a WinForm application, then continuation is itself 
+marshaled back onto the main UI thread, so when we append the line to <code>tbOutput</code>, 
+we don't need to do the marshalling ourselves with <code>Invoke</code> or <code>BeginInvoke</code>.</p>
+<h4><a name="CreatingEachTask25">Creating Each Task</a></h4>
+<pre>protected List&lt;Task&lt;int&gt;&gt; TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation()
+{
+  int numProcs = Environment.ProcessorCount;
+  nextNumber = 1;
+  List&lt;Task&lt;int&gt;&gt; tasks = new List&lt;Task&lt;int&gt;&gt;();
+  DateTime start = DateTime.Now;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    tbOutput.AppendLine(&quot;Starting thread &quot; + i + &quot; at &quot; + (DateTime.Now - start).TotalMilliseconds + &quot; ms&quot;);
+    var task = DoWorkWithReturnAsyncAndContinuation(i);
+    tasks.Add(task);
+  }
+
+  return tasks;
+}</pre>
+<p>Notice that this method does not actually create the tasks.&nbsp; It instead 
+calls <code>DoWorkWithReturnAsyncAndContinuation</code>.&nbsp; The reason is so that the 
+await in <code>DoWorkWithReturnAsyncAndContinuation</code> returns to the caller, which is 
+the code shown above, so that the next thread can be created.&nbsp; We can't 
+even write the method with an embedded <code>Task.Run()</code>:</p>
+<p><img border="0" src="cantdo.png" width="798" height="247"></p>
+<p>And even if we could, the <code>await</code> would return immediately to the caller.&nbsp; 
+When the task completed, the continuation would execute the next iteration of 
+the for loop and start the next thread.&nbsp; Since no other threads were 
+picking up work, all the work would have been done by the first thread!</p>
+<p>Instead, it is the <code>DoWorkWithReturnAsyncAndContinuation</code> method that actually 
+gets around to creating the task:</p>
+<pre>protected async Task&lt;int&gt; DoWorkWithReturnAsyncAndContinuation(int threadNum)
+{
+  DateTime start = DateTime.Now;
+  var t = await Task.Run(() =&gt; BruteForceAlgorithm(threadNum)); //.ConfigureAwait(true);
+
+  DateTime stop = DateTime.Now;
+
+  tbOutput.AppendLine(&quot;Continuation: Thread number &quot; + threadNum + &quot; finished.&quot;);
+  tbOutput.AppendLine(&quot;Total seconds = &quot; + (stop - start).TotalSeconds);
+  tbOutput.AppendLine(&quot;Continuation: Count = &quot; + t);
+
+  return t;
+}</pre>
+<p>Because <code>Task.Run</code> is being called from the application's UI thread, the 
+continuation is executed on the &quot;captured context&quot; - the UI thread.&nbsp; This 
+is equivalent to adding <code>.ConfigureAwait(true)</code>.&nbsp; If we used 
+<code>.ConfigureAwait(false)</code>, the continuation may or may not execute on the captured 
+context thread, in which case the UI outputs would have to be marshaled with 
+<code>Invoke</code> or <code>BeginInvoke</code>.&nbsp; It's also worth pointing 
+out that we don't need to <code>lock</code> the output to the UI to ensure that the lines are 
+written in the correct sequence.&nbsp; Because we're continuing on the captured 
+context (the UI thread) and there's only ever one UI thread, we're guaranteed 
+that all three <code>AppendLine</code> calls occur contiguously, regardless of whether 
+another task finishes in the meantime.&nbsp; That task's continuation will be 
+blocked until our continuation exits.</p>
+<h2><a name="SemaphoresandQueuingWork26">Semaphores and Queuing Work</a></h2>
+<p>A vital aspect of threads is how the thread picks up work.&nbsp; The above 
+examples all use a simple mechanism to get the next integer to test for &quot;primality&quot;:</p>
+<pre>while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)</pre>
+<p>In the real world, this is usually unrealistic.&nbsp; A thread usually is 
+instantiated:</p>
+<ol>
+	<li>To perform some task asynchronously and when the task is complete, the 
+	thread exists.</li>
+	<li>To wait for work to appear in a queue, which it then processes and after 
+	processing, goes back to sleep.</li>
+</ol>
+<p>The second form, waiting for work to appear, often involves using a semaphore 
+(from railroad signals<sup>9</sup>) to indicate that work is ready.&nbsp; The 
+complexity created here is terminating the thread when the application no longer 
+needs to the thread to do work.&nbsp; Semaphores can be used with &quot;old style&quot; 
+threads as well as the more modern techniques for creating threads.&nbsp; We'll 
+use semaphores with the <code>Task</code> class in the following examples.&nbsp; 
+These examples also introduce the <code>ConcurrentQueue</code> class found in the 
+<code>System.Collections.Concurrent</code> namespace.&nbsp; Here's the code:</p>
+<pre>static void UsingSemaphores()
+{
+  Semaphore sem = new Semaphore(0, Int32.MaxValue);
+  int numProcs = Environment.ProcessorCount;
+  var queue = new ConcurrentQueue&lt;int&gt;();
+  int numPrimes = 0;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    Task.Run(() =&gt;
+    {
+      while (true)
+      {
+        sem.WaitOne();
+
+        if (queue.TryDequeue(out int n))
+        {
+          if( IsPrime(n))
+          {
+            Interlocked.Increment(ref numPrimes);
+          }
+        }
+      }
+    });
+  }
+
+  DurationOf(() =&gt;
+  {
+    Enumerable.Range(2, MAX).ForEach(n =&gt;
+    {
+      queue.Enqueue(n);
+      sem.Release();
+    });
+
+    while (!queue.IsEmpty) Thread.Sleep(1);
+
+    return numPrimes;
+  }, &quot;Threads using semaphores&quot;);
+}</pre>
+<p>There are three sections to the above method.&nbsp; The reason I combined 
+them into a single method is for convenience of the closures.&nbsp; The first 
+section, instantiating the tasks, has two important lines:</p>
+<pre>...
+sem.WaitOne();
+
+if (queue.TryDequeue(out int n))
+...</pre>
+<p>Here, the thread is suspended until the semaphore signals that there is work 
+to be done.&nbsp; Once signaled, the work (in this case the next number to 
+process) is dequeued.&nbsp; In the <code>ConcurrentQueue</code>, <code>TryDequeue</code> is the only 
+dequeuing method available, which ensures that no other thread has removed the 
+queued item.&nbsp; With the semaphore, only one thread is released, so this is 
+not an issue here, but it would be an issue if there is no synchronization of 
+dequeuing work between threads.</p>
+<p>Next, the work is queued.&nbsp; One can release the semaphore one at a time, 
+or, after queuing the work, the semaphore can be given a release count.&nbsp; In 
+the example, I opted for the &quot;one at a time&quot; approach because I find it more 
+typical:</p>
+<pre>Enumerable.Range(2, MAX).ForEach(n =&gt;
+{
+  queue.Enqueue(n);
+  sem.Release();
+});</pre>
+<p>The third section waits for the queue to be empty -- this is really bad 
+practice, but we 
+want to discuss why it's wrong, so this is a teaching example:</p>
+<pre>while (!queue.IsEmpty) Thread.Sleep(1);</pre>
+<p>Ideally, putting a thread to sleep while we spin waiting for something to 
+happen, is a really bad idea.&nbsp; Instead, completion of a task should be 
+signaled using a semaphore or a task &quot;wait&quot; call, but for now we'll use this 
+code.</p>
+<p><img border="0" src="important.png" width="38" height="32"> One of the complexities of working with semaphores in threads (as opposed to awaitable async methods) is that while you can easily enqueue the work for the 
+thread to pick up, you don't really know when the threads have finished their 
+work.&nbsp; For example:</p>
+<p><img border="0" src="sem1.png" width="608" height="130">&nbsp; </p>
+<p>Notice the second computation of the number of primes is short by 4.&nbsp; 
+This is because, while the queue is empty, indicating that all work has been 
+done, the threads hadn't actually finished processing!</p>
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; As mentioned earlier, another problem is telling the thread, which is 
+waiting for work, that it should terminate because the application doesn't need 
+it anymore.&nbsp; We can deal with both issues by enqueuing a 0 as a poor-man's 
+flag to indicate that the thread should terminate.&nbsp; But we have to do this 
+for the number of threads that we created!&nbsp; First, we keep track of the 
+tasks:</p>
+<pre>...
+List&lt;Task&gt; tasks = new List&lt;Task&gt;();
+
+for (int i = 0; i &lt; numProcs; i++)
+{
+  tasks.Add(Task.Run(() =&gt;
+  ...</pre>
+<p>Second, when a 0 is dequeued, the task exits:</p>
+<pre>...
+if (queue.TryDequeue(out int n))
+{
+  if (n == 0)
+  {
+    break;
+  }
+...</pre>
+<p>Third, we enqueue the work of &quot;0&quot; for each task and release the semaphore for that count 
+-- this works because the thread exits, so the each thread will receive exactly 
+1 &quot;0&quot; to indicate that it should terminate:</p>
+<pre>for (int i = 0; i &lt; numProcs; i++)
+{
+  queue.Enqueue(0);
+}
+
+sem.Release(numProcs);</pre>
+<p>Lastly, we wait until the threads complete:</p>
+<pre>Task.WaitAll(tasks.ToArray());</pre>
+<p><img border="0" src="sem2.png" width="228" height="48"></p>
+<p>Now we have successfully written a the code based on <i>when the work is done</i> 
+rather than when the queue is empty of work<i> to be done.</i>&nbsp; A very 
+important difference.&nbsp; Also note that we could have written very similar 
+code using pure threads and <code>Thread.Join</code>.</p>
+<h2><a name="Mutexes,Locks,andSemaphores27">Mutexes, Locks, and Semaphores</a></h2>
+<p>It's also important to understand the difference between the <code>Mutex</code><sup>10</sup> class and 
+the lock statement.&nbsp; While a mutex (mutual-exclusion) might appear to be the same as a lock 
+statement, there are a couple important differences:</p>
+<ul>
+	<li>a mutex can have a timeout</li>
+	<li>a mutex can cross application boundaries</li>
+</ul>
+<p>This differs from a <code>lock</code> statement which cannot cross application boundaries 
+and does not support a timeout.&nbsp; In contrast with a semaphore, a mutex enforces thread identity, meaning that 
+a mutex can only be released by the thread that acquired it.&nbsp; With a 
+semaphore, any thread can <code>Release</code> the semaphore for the current or a different 
+thread to be released from the <code>WaitOne</code> call and continue execution.&nbsp; 
+We can use a mutex instead of the lock statement here:</p>
+<pre>static void DurationOf(Func&lt;int&gt; action, string section)
+{
+  var start = DateTime.Now;
+  int numPrimes = action();
+  var stop = DateTime.Now;
+
+  lock (locker)
+  {
+    Console.WriteLine(section);
+    Console.WriteLine(&quot;Number of primes is : &quot; + numPrimes);
+    Console.WriteLine(&quot;Total seconds = &quot; + (stop - start).TotalSeconds);
+  }
+}</pre>
+<p>The change would look like this:</p>
+<pre>...
+static Mutex mutex = new Mutex();
+...
+static void DurationOf(Func&lt;int&gt; action, string section)
+{
+  var start = DateTime.Now;
+  int numPrimes = action();
+  var stop = DateTime.Now;
+
+  mutex.WaitOne();
+  Console.WriteLine(section);
+  Console.WriteLine(&quot;Number of primes is : &quot; + numPrimes);
+  Console.WriteLine(&quot;Total seconds = &quot; + (stop - start).TotalSeconds);
+  mutex.ReleaseMutex();
+}</pre>
+<p>Mutexes are used to ensure the <i>mutual exclusion</i> of the same code, 
+whereas a semaphore is typically used to wait for work and to process work <i>
+simultaneously</i> by the same code in different threads.&nbsp; Also, as you can 
+see from the above code, which demonstrates a very simple mutual exclusion, a 
+<code>lock</code> statement is superior because it doesn't require instantiating a global 
+mutex.</p>
+<h2><a name="ExceptionHandling28">Exception Handling</a></h2>
+<p>While I'd love to claim that my threads never throw exceptions, the reality 
+is that exception handling has to be dealt with.&nbsp; </p>
+<h3><a name="ExceptionsHandlingandtheThreadClass29">Exceptions Handling and the Thread Class</a></h3>
+<p>For giggles, let's change the brute force method to throw an exception if the 
+number is prime!</p>
+<pre>static void NextWorkItemBruteForceThreadThrowsException(object parms)
+{
+  int threadNum = (int)parms;
+  DurationOf(() =&gt;
+  {
+    int n;
+
+    while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)
+    {
+      if (IsPrime(n))
+      {
+        throw new Exception(&quot;Number is prime: &quot; + n);
+      }
+    }
+
+    return 0;
+  }, $&quot;Thread: {threadNum}&quot;);
+}</pre>
+<p>Running this in our console tests, we get this ugly mess:</p>
+<p><img border="0" src="ex1.png" width="698" height="512"></p>
+<p>What we want to do though is provide a way to handle the exception more 
+gracefully.&nbsp; Implementing UnhandledException:</p>
+<pre>Thread.GetDomain().UnhandledException += (sndr, exargs) =&gt;
+{
+  Console.WriteLine(&quot;Thread: &quot; + (exargs.ExceptionObject as Exception)?.Message);
+};
+
+AppDomain.CurrentDomain.UnhandledException += (sndr, exargs) =&gt;
+{
+  Console.WriteLine(&quot;AppDomain: &quot; + (exargs.ExceptionObject as Exception)?.Message);
+};</pre>
+<p>isn't really what we want because the console still logs the entire stack 
+trace and more importantly, the uncaught exception in the thread will terminate 
+the application, which probably isn't what we want to happen.&nbsp; A better 
+solution is the wrap the thread method in a try-catch block and provide an 
+exception handler:</p>
+<pre>static void SafeThread(Action action)
+{
+  try
+  {
+    action();
+  }
+  catch (Exception ex)
+  {
+    Console.WriteLine(&quot;Exception: &quot; + ex.Message);
+  }
+}
+
+static void ThreadExceptionExample()
+{
+  List&lt;(Thread thread, int threadNum)&gt; threads = new List&lt;(Thread thread, int threadNum)&gt;();
+  int numProcs = Environment.ProcessorCount;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    // We changed the signature of NextWorkItemBruteForceThreadThrowsException slightly:
+    // And we're no longer using a parameterized thread start because we have closure on i.
+    var thread = new Thread(new ThreadStart(() =&gt; SafeThread(() =&gt; NextWorkItemBruteForceThreadThrowsException(i))));
+    thread.IsBackground = true;
+    threads.Add((thread, i));
+  }
+
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  threads.ForEach(t =&gt; t.thread.Start());
+  threads.ForEach(t =&gt; t.thread.Join());
+}</pre>
+<p>Now we get:</p>
+<p><img border="0" src="ex2.png" width="298" height="134"></p>
+<p>Notice that the console application also doesn't abruptly terminate.&nbsp; </p>
+<h3><a name="ExceptionHandlingwithTask30">Exception Handling with Task</a></h3>
+<p>Here's the code that sets up running tasks that throws an exception when the 
+number is prime:</p>
+<pre>static int TaskAwaitGetNextWorkItemBruteForceThrowsException()
+{
+  int numProcs = Environment.ProcessorCount;
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  List&lt;Task&gt; tasks = new List&lt;Task&gt;();
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var task = DoWorkAsyncThrowsException(i);
+    tasks.Add(task);
+  }
+
+  Task.WaitAll(tasks.ToArray());
+
+  return totalNumPrimes;
+}
+
+static async Task DoWorkAsyncThrowsException(int threadNum)
+{
+  await Task.Run(() =&gt; NextWorkItemBruteForceThreadThrowsException(threadNum));
+}</pre>
+<p>This results in the usual ugly console log and the console application 
+terminates:</p>
+<p><img border="0" src="ex3.png" width="638" height="524"></p>
+<p>If we do this however:</p>
+<pre>static async Task DoWorkAsyncThrowsException(int threadNum)
+{
+  try
+  {
+     await Task.Run(() =&gt; NextWorkItemBruteForceThreadThrowsException(threadNum));
+  }
+  catch (Exception ex)
+  {
+    Console.WriteLine(ex.Message);
+  }
+}</pre>
+<p>We can now handle the exception and the application doesn't terminate:</p>
+<p><img border="0" src="ex4.png" width="265" height="161"></p>
+<p>If you use the one of the <code>Task.Wait</code> methods, the exception being thrown by 
+the awaited task is actually very sophisticated.&nbsp; Read more about it here &quot;<a href="https://docs.microsoft.com/en-us/dotnet/standard/parallel-programming/exception-handling-task-parallel-library">Exception 
+Handling (Task Parallel Library)</a>&quot;.&nbsp; Changing our example slightly:</p>
+<pre>static int TaskAwaitGetNextWorkItemBruteForceThrowsException()
+{
+  int numProcs = Environment.ProcessorCount;
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  List&lt;Task&gt; tasks = new List&lt;Task&gt;();
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var task = DoWorkAsyncThrowsException(i);
+    tasks.Add(task);
+  }
+
+  try
+  {
+    Task.WaitAll(tasks.ToArray());
+  }
+  catch (AggregateException ex)
+  {
+    Console.WriteLine(ex.Message);
+
+    tasks.ForEachWithIndex((t, i) =&gt;
+    {
+      Console.WriteLine(&quot;Task &quot; + i);
+      Console.WriteLine(&quot;Is canceled: &quot; + t.IsCanceled);
+      Console.WriteLine(&quot;Is completed: &quot; + t.IsCompleted);
+      Console.WriteLine(&quot;Is faulted: &quot; + t.IsFaulted);
+    });
+  }
+
+  return totalNumPrimes;
+}
+
+static async Task DoWorkAsyncThrowsException(int threadNum)
+{
+  await Task.Run(() =&gt; NextWorkItemBruteForceThreadThrowsException(threadNum));
+}</pre>
+<p>Notice the output now, after moving the try-catch block to the <code>Wait</code> call:</p>
+<p><img border="0" src="ex5.png" width="269" height="354"></p>
+<h3><a name="DoNOTuseasyncvoid31">Do NOT use async void!</a></h3>
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; Methods declared as &quot;async void&quot; do not have a <code>Task</code> object -- exceptions 
+thrown in the &quot;task&quot; will be raised directly on the <code>SynchronizationContext</code>.&nbsp; 
+In a console app, that means we can't catch the exception, instead it's handled 
+by the <code>AppDomain.CurrentDomain.UnhandledException</code>.&nbsp; Here's an example:</p>
+<pre>static async void ThrowExceptionAsync()
+{
+  await Task.Run(() =&gt; NextWorkItemBruteForceThreadThrowsException(0));
+}
+
+static void AsyncVoidExceptionTest()
+{
+  try
+  {
+    ThrowExceptionAsync();
+  }
+  catch (Exception ex)
+  {
+    Console.WriteLine(&quot;AsyncVoidExceptionTest: &quot; + ex.Message);
+  }
+}</pre>
+<p>Notice the output:</p>
+<p><img border="0" src="ex6.png" width="600" height="254"></p>
+<p>The task exception was handled by the <code>AppDomain</code> handler!&nbsp; 
+Contrast the exception handling with this code:</p>
+<pre>static async Task&lt;int&gt; ThrowExceptionAsync()
+{
+  await Task.Run(() =&gt; NextWorkItemBruteForceThreadThrowsException(0));
+
+  return 0;
+}
+
+static async Task&lt;int&gt; AsyncVoidExceptionTest()
+{
+  try
+  {
+    await ThrowExceptionAsync();
+  }
+  catch (Exception ex)
+  {
+    Console.WriteLine(&quot;AsyncVoidExceptionTest: &quot; + ex.Message);
+  }
+
+  return 0;
+}</pre>
+<p>and the output:</p>
+<p><img border="0" src="ex7.png" width="377" height="108"></p>
+<p>Here the exception is being handled by our outer await.&nbsp; What throws (no 
+pun intended) everyone for a loop is that when a method is declared as a 
+non-void async method, it must be awaited upon:</p>
+<p><img border="0" src="ex8.png" width="1045" height="200"></p>
+<p>But awaiting on a task means the method has to return a <code>Task</code> or be declared 
+as <code>async void</code>, which is exactly what we're trying to NOT do!&nbsp; 
+This can result in a cascade of refactoring parent methods to await and have the 
+signature of <code>async Task&lt;T&gt;</code>, all the way up to <code>Main</code>, which now can be declared as 
+<code>async void</code>!&nbsp; If you find yourself doing this, you're doing 
+something wrong with the structure of your async methods.&nbsp; In the test case 
+presented here, I stopped the cascade by calling, in Main:</p>
+<pre>Task.Run(() =&gt; AsyncVoidExceptionTest());</pre>
+<p>Conversely, we could do this:</p>
+<pre>static async Task&lt;int&gt; Main(string[] args)
+{
+  await AsyncVoidExceptionTest();
+  return 0;
+}</pre>
+<p>but not this:</p>
+<pre>static async void Main(string[] args)</pre>
+<p>which results in a compiler error: &quot;error CS4009: A void or int returning entry point cannot be async&quot;</p>
+<p>The point being, avoid (no pun intended again) <code>async void</code>, but really look 
+carefully at how your async tasks are being called so you don't end up 
+refactoring every method signature in the call hierarchy, all the way up to 
+<code>Main</code>!</p>
+<h2><a name="AwaitableThreads-AHybridApproachusingTaskCompletionSource32">Awaitable Threads - A Hybrid Approach using TaskCompletionSource</a></h2>
+<p><img border="0" src="hybrid1.png" width="263" height="327"></p>
+<p>What if you want to use threads that you create yourself rather than being 
+married to the thread pool, but you still want to take advantage of the ability 
+to await on the thread?&nbsp; This is accomplished using the 
+<code>TaskCompletionSource</code> class.&nbsp; This class wraps a <code>Task</code> instance 
+that you can use exactly as if the task had been created using <code>Task.Run</code> or 
+similar task creation methods.&nbsp; In the following example, we set up a 
+<code>TaskCompletionSource</code> for each thread and pass the <code>TaskCompletionSource</code> instance 
+to that thread:</p>
+<pre>static int HybridAwaitableThread()
+{
+  List&lt;(Thread thread, int threadNum)&gt; threads = new List&lt;(Thread thread, int threadNum)&gt;();
+  List&lt;TaskCompletionSource&lt;int&gt;&gt; tasks = new List&lt;TaskCompletionSource&lt;int&gt;&gt;();
+  int numProcs = Environment.ProcessorCount;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var thread = new Thread(new ParameterizedThreadStart(HybridThread));
+    thread.IsBackground = true;
+    threads.Add((thread, i));
+    tasks.Add(new TaskCompletionSource&lt;int&gt;());
+  }
+
+  nextNumber = 1;
+  threads.ForEachWithIndex((t, idx) =&gt; t.thread.Start((t.threadNum, tasks[idx])));
+  Task.WaitAll(tasks.Select(t=&gt;t.Task).ToArray());
+
+  return tasks.Sum(t=&gt;t.Task.Result);
+}</pre>
+<p>Now, while the above code is using the blocking <code>Task.WaitAll</code> for timing 
+purposes, it would be perfectly valid in a different scenario (for example, a 
+Windows app) to also call await 
+<code>Task.WhenAll(tasks.Select(t=&gt;t.Task))</code> so that awaiting for the threads to 
+complete isn't blocking.</p>
+<p>Notice that this line:</p>
+<pre>threads.ForEachWithIndex((t, idx) =&gt; t.thread.Start((t.threadNum, tasks[idx])));</pre>
+<p>passes in a tuple including the <code>TaskCompletionSource</code> instance.&nbsp; In the thread 
+implementation, we use <code>SetResult</code> when the thread is complete, &quot;signaling&quot; that 
+the task is done:</p>
+<pre>static void HybridThread(object parms)
+{
+  (int threadNum, TaskCompletionSource&lt;int&gt; tcs) parm = (ValueTuple&lt;int, TaskCompletionSource&lt;int&gt;&gt;)parms;
+
+  DurationOf(() =&gt;
+  {
+    int numPrimes = 0;
+    int n;
+
+    while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)
+    {
+      if (IsPrime(n))
+      {
+        ++numPrimes;
+      }
+    }
+
+    parm.tcs.SetResult(numPrimes);
+    return numPrimes;
+  }, $&quot;Thread: {parm.threadNum}&quot;);
+}</pre>
+<p>The salient line here is <code>parm.tcs.SetResult(numPrimes);</code> which completes the task.<h2><a name="CancelingThreadsandTasks33">Canceling Threads and Tasks</a></h2>
+<p>Canceling a thread or task is a complicated subject<sup>16,17</sup>, the essence 
+of which is described here.&nbsp; The first thing to determine is what it is 
+you're trying to cancel:</p>
+<ol>
+	<li>A CPU-bound thread that doesn't wait on any mutexes, semaphores, or 
+	other &quot;delays&quot;.</li>
+	<li>An I/O-bound thread that waits on the completion of an asynchronous I/O 
+	operation.</li>
+	<li>A thread that waits on a mutex or semaphore to release it.</li>
+</ol>
+<p>All three approaches can take advantage of the <code>CancellationTokenSource</code> 
+class, but how you use the token varies according to the above three options:</p>
+<ol>
+	<li>CPU-bound work: typically polls the cancellation token.&nbsp; You can 
+	choose to:<ol>
+		<li>Operation cancellation: Clean up and exit the thread.</li>
+		<li>Object cancellation: Set up an object that implements a Cancel (or 
+		similar) method and the object-internal mechanism for canceling the 
+		work.</li>
+	</ol>
+	</li>
+	<li>I/O-bound work: this requires registering a callback that in turn 
+	cancels the async I/O operation.</li>
+	<li>Mutex/Semaphore: This requires setting up a wait handle that you pass to 
+	the mutex or sempahore.&nbsp; Canceling a thread in a wait state releases 
+	the thread and allows it to terminate.</li>
+</ol>
+<p>The proper use of the <code>OperationCanceledException</code> is important so that 
+your code interacts well with library code, and vice-versa.&nbsp; An important 
+thing to understand is that cancellation is <i>cooperative</i> -- requesting a 
+cancel does not mean that the listener of the token has to actually stop.</p>
+<p>Lastly, tasks cannot be canceled if the code library implementing the task 
+does not observe the <code>CancellationToken</code>!&nbsp; If your code implements a task, 
+consider well whether you should be observing a cancellation token yourself!</p>
+<p>For the following examples, let's say we want to set an upper limit of 1 second of processing for 
+computing primes using our brute force algorithm.&nbsp; First off, we should 
+create cancellation tokens for <i>each operation.</i>&nbsp; If performing object 
+cancellation, one token can cancel all the required objects.&nbsp; Here we'll 
+focus on canceling operations, not objects.</p>
+<h3><a name="CancelingThreads34">Canceling Threads</a></h3>
+<p><img border="0" src="cancel1.png" width="314" height="299"></p>
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; Do not cancel a task by killing it with <code>thread.Abort()</code>.&nbsp; You run the 
+risk of memory leaks, deadlocks and other nasty affects by terminating a thread 
+without giving it the opportunity to do its cleanup.&nbsp; Instead, here, when we instantiate the threads, we pass a cancellation token for each 
+thread to check:</p>
+<pre>static int CancelThreads()
+{
+  List&lt;(Thread thread, int threadNum, CancellationTokenSource cts)&gt; threads = 
+    new List&lt;(Thread thread, int threadNum, CancellationTokenSource cts)&gt;();
+  int numProcs = Environment.ProcessorCount;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var thread = new Thread(new ParameterizedThreadStart(CancellableThread));
+    var cts = new CancellationTokenSource();
+    thread.IsBackground = true;
+    threads.Add((thread, i, cts));
+  }
+
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  threads.ForEach(t =&gt; t.thread.Start((t.threadNum, t.cts)));
+
+  // After 1 second, cancel our threads
+  threads.ForEach(t =&gt; t.cts.CancelAfter(1000));
+  threads.ForEach(t =&gt; t.thread.Join());
+
+  return totalNumPrimes;
+}</pre>
+<p>We then request that each thread is cancelled after 1 second.&nbsp; The 
+worker thread checks its token for each iteration:</p>
+<pre>static void CancellableThread(object parms)
+{
+  (int threadNum, CancellationTokenSource cts) parm = (ValueTuple&lt;int, CancellationTokenSource&gt;)parms;
+
+  DurationOf(() =&gt;
+  {
+    int numPrimes = 0;
+    int n;
+
+    while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)
+    {
+      if (parm.cts.IsCancellationRequested)
+      {
+        break;
+      }
+
+      if (IsPrime(n))
+      {
+        ++numPrimes;
+      }
+    }
+
+    Interlocked.Add(ref totalNumPrimes, numPrimes);
+    return numPrimes;
+  }, $&quot;Thread: {parm.threadNum}&quot;);
+}</pre>
+<p>In the screenshot above, notice that the threads don't terminate exactly at 1 
+second -- the brute force algorithm takes some time between each iteration!</p>
+<h3><a name="CancelingTasks35">Canceling Tasks</a></h3>
+<p>With tasks, we can exit the task:</p>
+<ul>
+	<li>gracefully</li>
+	<li>by calling the cancellation token's ThrowIfCancellationRequested method</li>
+	<li>by throwing OperationCanceledException ourselves.</li>
+</ul>
+<p>Let's look at the differences.&nbsp; Here's the setup common to all three 
+cancellation examples:</p>
+<pre>static int CancelTasks()
+{
+  int numProcs = Environment.ProcessorCount;
+  totalNumPrimes = 0;
+  nextNumber = 1;
+  List&lt;(Task task, CancellationTokenSource cts)&gt; tasks = new List&lt;(Task, CancellationTokenSource)&gt;();
+  DateTime start = DateTime.Now;
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    Console.WriteLine(&quot;Starting thread &quot; + i + &quot; at &quot; + (DateTime.Now - start).TotalMilliseconds + &quot; ms&quot;);
+    var cts = new CancellationTokenSource();
+    var task = Task.Run(() =&gt; CancellableTask(i, cts), cts.Token);
+    tasks.Add((task, cts));
+  }
+
+  tasks.ForEach(t =&gt; t.cts.CancelAfter(1000));
+
+  try
+  {
+    Task.WaitAll(tasks.Select(t =&gt; t.task).ToArray());
+  }
+  catch (AggregateException ex)
+  {
+    Console.WriteLine(ex.Message);
+
+    tasks.ForEachWithIndex((t, i) =&gt;
+    {
+      Console.WriteLine(&quot;Task &quot; + i);
+      Console.WriteLine(&quot;Is canceled: &quot; + t.task.IsCanceled);
+      Console.WriteLine(&quot;Is completed: &quot; + t.task.IsCompleted);
+      Console.WriteLine(&quot;Is faulted: &quot; + t.task.IsFaulted);
+    });
+  }
+
+  return totalNumPrimes;
+}</pre>
+<h4><a name="GracefullyCanceltheTask36">Gracefully Cancel the Task</a></h4>
+<p>
+<img border="0" src="cancel2.png" width="328" height="337"></p>
+<p>
+The implementation of the worker task:</p>
+<pre>static void CancellableTask(int threadNum, CancellationTokenSource cts)
+{
+  DurationOf(() =&gt;
+  {
+    int numPrimes = 0;
+    int n;
+
+    while ((n = Interlocked.Increment(ref nextNumber)) &lt; MAX)
+    {
+      if (cts.IsCancellationRequested)
+      {
+        // Graceful exit
+        break;
+      }
+
+      if (IsPrime(n))
+      {
+        ++numPrimes;
+      }
+    }
+
+    Interlocked.Add(ref totalNumPrimes, numPrimes);
+    return numPrimes;
+  }, $&quot;Thread: {threadNum}&quot;);
+}</pre>
+<p>Notice how long it takes to cancel a task!&nbsp; We requested that the task 
+be cancelled after 1 second, but it actually takes the tasks 4 seconds to 
+cancel.&nbsp; As expected with a graceful exit, no exception is thrown.</p>
+<h4><a name="CalltheToken'sThrowIfCancellationRequested37">Call the Token's ThrowIfCancellationRequested</a></h4>
+<p><img border="0" src="cancel3.png" width="337" height="428"></p>
+<p>The implementation differs in that, instead of:</p>
+<pre>if (cts.IsCancellationRequested)
+{
+  // Graceful exit
+  break;
+}</pre>
+<p>We do this instead:</p>
+<pre>cts.Token.ThrowIfCancellationRequested();</pre>
+<p>In this example, notice that an exception is thrown and each task is in the 
+&quot;canceled&quot; state <i>and</i> the &quot;completed&quot; state.</p>
+<p>Notice in the setup this very important line:</p>
+<pre>var task = Task.Run(() =&gt; CancellableTask(i, cts), cts.Token);</pre>
+<p><img border="0" src="important.png" width="38" height="32">&nbsp; If we don't set the cancellation token as part of the <code>Task.Run</code>, 
+the task's <code>IsCanceled</code> flag is NOT set and the exception is treated as a fault 
+instead!</p>
+<h4><a name="ThrowingOurOwnOperationCanceledException38">Throwing Our Own OperationCanceledException</a></h4>
+<p><img border="0" src="cancel4.png" width="284" height="420"></p>
+<p>The implementation is again slightly different:</p>
+<pre>if (cts.IsCancellationRequested)
+{
+  throw new OperationCanceledException();
+}</pre>
+<p>Notice here that the task's <code>IsCanceled</code> flag is false but the <code>IsFaulted</code> flag 
+is true!</p>
+<h3><a name="CancelingThreadsAwaitingonaSemaphore39">Canceling Threads Awaiting on a Semaphore</a></h3>
+<p><img border="0" src="ex9.png" width="373" height="402"></p>
+<p>Lastly, let's go back the the threading example where we used a semaphore to 
+signal work was queued and look at how to cancel the thread.&nbsp; In this 
+example, I will specifically NOT queue any work so we can can be sure that the 
+semaphore is released as the result of the cancellation rather than processing 
+some work.&nbsp; As before, this is an &quot;inline&quot; method -- notice:</p>
+<ul>
+	<li>As we did before, we're passing the cancellation token as a parameter to 
+	<code>Task.Run</code>.</li>
+	<li>Something new here -- we're using SemaphoreSlim instead of Semaphore 
+	because SemaphoreSlim supports a Wait method that accepts the cancellation 
+	token as a parameter.&nbsp; This is how the semaphore is released when the 
+	cancel request is made.</li>
+</ul>
+<p>Here's the code that instantiates and executes the tasks, then cancels them 
+after 1 second:</p>
+<pre>static void CancellableSemaphores()
+{
+  SemaphoreSlim sem = new SemaphoreSlim(0, Int32.MaxValue);
+  int numProcs = Environment.ProcessorCount;
+  var queue = new ConcurrentQueue&lt;int&gt;();
+  int numPrimes = 0;
+  List&lt;(Task task, CancellationTokenSource cts)&gt; tasks = new List&lt;(Task, CancellationTokenSource)&gt;();
+
+  for (int i = 0; i &lt; numProcs; i++)
+  {
+    var cts = new CancellationTokenSource();
+
+    tasks.Add((Task.Run(() =&gt;
+    {
+      while (true)
+      {
+        sem.Wait(cts.Token);
+
+        if (queue.TryDequeue(out int n))
+        {
+          if (n == 0)
+          {
+            break;
+          }
+
+          if (IsPrime(n))
+          {
+            Interlocked.Increment(ref numPrimes);
+          }
+        }
+      }
+    }, cts.Token), cts));
+  }
+
+  DurationOf(() =&gt;
+  {
+    // Don't enqueue anything. We want the thread to wait and be released by the cancellation token.
+    tasks.ForEach(t =&gt; t.cts.CancelAfter(1000));
+
+    try
+    {
+      Task.WaitAll(tasks.Select(t =&gt; t.task).ToArray());
+    }
+    catch (AggregateException ex)
+    {
+      Console.WriteLine(ex.Message);
+
+      tasks.ForEachWithIndex((t, i) =&gt;
+      {
+        Console.WriteLine(&quot;Task &quot; + i);
+        Console.WriteLine(&quot;Is canceled: &quot; + t.task.IsCanceled);
+        Console.WriteLine(&quot;Is completed: &quot; + t.task.IsCompleted);
+        Console.WriteLine(&quot;Is faulted: &quot; + t.task.IsFaulted);
+      });
+    }
+
+    return numPrimes;
+  }, &quot;Threads using cancellable semaphores&quot;);
+}</pre>
+<p>Notice how the semaphore is released as a result of the cancel request.&nbsp; This code, as the screenshot above shows, will throw an exception on the task 
+that is caught in the Task.WaitAll call.&nbsp; Instead of:</p>
+<pre>sem.Wait(cts.Token);</pre>
+<p>We could catch the exception in the task and exit gracefully:</p>
+<pre>try
+{
+  sem.Wait(cts.Token);
+}
+catch (OperationCanceledException)
+{
+  break;
+}</pre>
+<p><img border="0" src="ex10.png" width="341" height="187"></p>
+<p>However, we don't know that the task was cancelled.&nbsp; The only way we 
+would know that a task has been cancelled is if we use some external mechanism, 
+even possibly a return value that indicates the task cancellation state.&nbsp; 
+To the outside world, the above code looks like the task completed all its work.&nbsp; </p>
+<p>We could also write 
+this somewhat redundant code:</p>
+<pre>try
+{
+  sem.Wait(cts.Token);
+}
+catch (OperationCanceledException)
+{
+  cts.Token.ThrowIfCancellationRequested();
+}</pre>
+<p>In all cases, the <code>AggregateException.Exceptions[]</code> contains 
+instances of <code>TaskCanceledException</code> exception types.</p>
+<h2><a name="TheThreadPoolClassandCPU-BoundWork40">The ThreadPool Class and CPU-Bound Work</a></h2>
+<p>There is no advantage to creating more threads than cores for CPU-bound work 
+-- that is, where each thread is never in a wait state.&nbsp; </p>
+<h3><a name="MoreThreadsthanCores41">More Threads than Cores</a></h3>
+<p>For example, when 
+I test the performance of 4 threads (not tasks, actual threads which do not use 
+the .NET <code>ThreadPool</code>) because there are 4 CPU's on my system, it 
+takes about 8 seconds.&nbsp; </p>
+<p><img border="0" src="tp1.png" width="336" height="263"></p>
+<p>If I increase the number of threads to 20:</p>
+<p><img border="0" src="tp2.png" width="337" height="61"></p>
+<p>The processing time is almost 9 seconds -- 2 seconds longer!&nbsp; The 
+overhead in doing all that context switching between threads is quite 
+noticeable.</p>
+<h3><a name="MoreTasksthanCores42">More Tasks than Cores</a></h3>
+<p>With tasks, if the number of tasks I create is equal to the number of cores, 
+they all start pretty much at the same time (the times are in seconds):</p>
+<p><img border="0" src="tp3.png" width="263" height="201"></p>
+<p>Now look what happens when I try to start 20 CPU-bound tasks on a 4 core 
+system:</p>
+<p><img border="0" src="tp4.png" width="278" height="456"></p>
+<p>Again, the times are in <i>seconds.</i>&nbsp; Tasks 0-3 start as expected.&nbsp; 
+Then there is a 4 second delay before the next task starts, and 5 seconds for 
+the next one after that.&nbsp; By that time, the first 4 tasks have completed 
+all the work and the remaining tasks are created with nothing to do so they 
+terminate fairly quickly.&nbsp; The time delay after the first four tasks are 
+the consequence of the <code>ThreadPool</code>'s scheduler, which delays starting more 
+CPU-bound tasks when the number of tasks exceeds the number of cores.&nbsp; 
+There's a variety of write-ups on the behavior of the <code>ThreadPool</code>, particularly 
+that once tasks &gt; CPU cores, subsequent tasks are delayed by 500ms.&nbsp; 
+There's clearly a lot more delay going on than that!&nbsp; Diving into the 
+<code>ThreadPool</code> class is really going beyond the scope of this article -- the point 
+here is, if you use the <code>ThreadPool</code> class (and beware of all the various ways of 
+creating threads that tie in to the <code>ThreadPool</code> class) you need to be cognizant 
+of how many threads you're creating, what they're doing, and how long they do 
+it.</p>
+<h2><a name="Conclusion43">Conclusion</a></h2>
+<p>This article covered quite a bit actually:</p>
+<ul>
+	<li>&quot;Old-style&quot; thread creation</li>
+	<li>Thread joins</li>
+	<li>Background threads</li>
+	<li>Working with thread parameters</li>
+	<li>Balancing and optimizing threads (ask, don't tell)</li>
+	<li>Interlocked and Atomic operations</li>
+	<li>AsParallel</li>
+	<li>Task.RUn</li>
+	<li>Using await</li>
+	<li>Queuing work</li>
+	<li>Semaphores, Mutexes, and Locks</li>
+	<li>Exception Handling</li>
+	<li>Hybrid approaches</li>
+	<li>Cancel threads and tasks</li>
+	<li>Brief look at the ThreadPool class</li>
+</ul>
+<h3><a name="OtherReading44">Other Reading</a></h3>
+<p>
+<a href="https://channel9.msdn.com/Series/Three-Essential-Tips-for-Async/Tip-2-Distinguish-CPU-Bound-work-from-IO-bound-work">
+https://channel9.msdn.com/Series/Three-Essential-Tips-for-Async/Tip-2-Distinguish-CPU-Bound-work-from-IO-bound-work</a> </p>
+<p>
+<a href="https://stackoverflow.com/questions/5983779/catch-exception-that-is-thrown-in-different-thread#">https://stackoverflow.com/questions/5983779/catch-exception-that-is-thrown-in-different-thread#</a></p>
+<p>
+<a href="https://social.msdn.microsoft.com/Forums/vstudio/en-US/c95ba61b-78d3-462f-b09f-cd0571ffd22d/how-do-you-catch-exceptions-in-threaded-console-application?forum=csharpgeneral">
+https://social.msdn.microsoft.com/Forums/vstudio/en-US/c95ba61b-78d3-462f-b09f-cd0571ffd22d/how-do-you-catch-exceptions-in-threaded-console-application?forum=csharpgeneral</a></p>
+<p>
+Async void and exceptions:<a href="https://msdn.microsoft.com/en-us/magazine/jj991977.aspx"> 
+https://msdn.microsoft.com/en-us/magazine/jj991977.aspx</a></p>
+<p>LongRunning:
+<a href="http://blog.i3arnon.com/2015/07/02/task-run-long-running/">
+http://blog.i3arnon.com/2015/07/02/task-run-long-running/</a></p>
+<p>Working with the ThreadPool:
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/threading/the-managed-thread-pool">
+https://docs.microsoft.com/en-us/dotnet/standard/threading/the-managed-thread-pool</a> </p>
+<p>Task Completion: 
+<a href="https://stackoverflow.com/questions/16063520/how-do-you-create-an-asynchronous-method-in-c">https://stackoverflow.com/questions/16063520/how-do-you-create-an-asynchronous-method-in-c</a> </p>
+<h2><a name="Footnotes45">Footnotes</a></h2>
+<p><sup>1</sup> -&nbsp; the Intel CPU LOCK instruction supports ADD, ADC, AND, 
+BTC, BTR, BTS, CMPXCHG, CMPXCH8B, DEC, INC, NEG, NOT, OR, SBB, SUB, XOR, XADD, 
+and XCHG</p>
+<p><sup>2</sup> - 
+<a href="https://stackoverflow.com/questions/868568/what-do-the-terms-cpu-bound-and-i-o-bound-mean">https://stackoverflow.com/questions/868568/what-do-the-terms-cpu-bound-and-i-o-bound-mean</a></p>
+<p><sup>3</sup> -
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/asynchronous-programming-patterns/implementing-the-task-based-asynchronous-pattern">
+https://docs.microsoft.com/en-us/dotnet/standard/asynchronous-programming-patterns/implementing-the-task-based-asynchronous-pattern</a> </p>
+<p><sup>4</sup> -
+<a href="https://msdn.microsoft.com/en-us/library/windows/desktop/ms686908(v=vs.85).aspx">
+https://msdn.microsoft.com/en-us/library/windows/desktop/ms686908(v=vs.85).aspx</a> </p>
+<p><sup>5</sup> -
+<a href="https://msdn.microsoft.com/en-us/library/system.threading.synchronizationcontext(v=vs.110).aspx">
+https://msdn.microsoft.com/en-us/library/system.threading.synchronizationcontext(v=vs.110).aspx</a> </p>
+<p><sup>6</sup> - <a href="https://msdn.microsoft.com/magazine/gg598924.aspx">
+https://msdn.microsoft.com/magazine/gg598924.aspx</a> </p>
+<p><sup>7</sup> -
+<a href="https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/concepts/async/async-return-types">
+https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/concepts/async/async-return-types</a> </p>
+<p><sup>8</sup> -
+<a href="https://blogs.msdn.microsoft.com/pfxteam/2011/10/24/task-run-vs-task-factory-startnew/">
+https://blogs.msdn.microsoft.com/pfxteam/2011/10/24/task-run-vs-task-factory-startnew/</a> </p>
+<p><sup>9</sup> -
+<a href="https://en.wikipedia.org/wiki/Railway_semaphore_signal">
+https://en.wikipedia.org/wiki/Railway_semaphore_signal</a> </p>
+<p><sup>10</sup> -
+<a href="https://msdn.microsoft.com/en-us/library/system.threading.mutex(v=vs.110).aspx">
+https://msdn.microsoft.com/en-us/library/system.threading.mutex(v=vs.110).aspx</a> </p>
+<p><sup>11</sup> - https://en.wikipedia.org/wiki/Thread_(computing) </p>
+<p><sup>12</sup> -
+<a href="https://www.microsoftpressstore.com/articles/article.aspx?p=2233328&seqNum=7">
+https://www.microsoftpressstore.com/articles/article.aspx?p=2233328&amp;seqNum=7</a></p>
+<p><sup>13</sup> - https://en.wikipedia.org/wiki/Fiber_(computer_science) </p>
+<p><sup>14</sup> -
+<a href="https://en.wikipedia.org/wiki/Cooperative_multitasking">
+https://en.wikipedia.org/wiki/Cooperative_multitasking</a></p>
+<p><sup>15</sup> -
+<a href="https://en.wikipedia.org/wiki/Preemption_(computing)#PREEMPTIVE">
+https://en.wikipedia.org/wiki/Preemption_(computing)#PREEMPTIVE</a></p>
+<p><sup>16</sup> -
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads">
+https://docs.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads</a> </p>
+<p><sup>17</sup> -
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/parallel-programming/task-cancellation">
+https://docs.microsoft.com/en-us/dotnet/standard/parallel-programming/task-cancellation</a> </p>
+<p><sup>18</sup> -
+<a href="http://www.sparxeng.com/blog/software/must-use-net-system-io-ports-serialport">
+http://www.sparxeng.com/blog/software/must-use-net-system-io-ports-serialport</a> </p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+
+</body>
+
+</html>

@@ -13,16 +13,24 @@
 mutexes, semaphores, 
 concurrent collections, work queues, threads, PLINQ, TPL, exception 
 handling, and cancellation tokens. </p>
+<p>&nbsp;</p>
+<!-- INSERT contents -->
+<p>&nbsp;</p>
 <h2>Introduction</h2>
 <p>I was recently asked to provide some training on how threads are used in C#.&nbsp; 
-What started off as simple (doesn't it always) turned into a detailed analysis 
+What I thought would be a fairly simple discussions turned into a detailed analysis 
 of different approaches to threading and important topics such as canceling 
-tasks and exception handling..&nbsp; While 
+tasks and exception handling.&nbsp; So much for applying my 30+ years of 
+experience in judging the scope of a project, even if the &quot;project&quot; is an 
+article!&nbsp; What's new here is that while 
 this has all been discussed before, I'm hoping that this article provides some 
 interesting insights and coverage of the topic that perhaps hasn't been done 
 before in one article.&nbsp; Threading, tasks, cancellation, exceptions, and so 
 forth is a <i>huge</i> topic, whole books have been written on the subject.&nbsp; 
-This article presents an incomplete but concise overview with lots of examples.</p>
+This article presents an incomplete but hopefully concise overview.&nbsp; There 
+are lots of examples and the focus is on the essentials that you need to know 
+about 90% of the time rather than all the other extraneous stuff you might need 
+the remaining 10% of the time.</p>
 <h3>What Is a Thread?</h3>
 <p>I suppose I should start with a brief description of what a thread is, 
 although quite frankly, I'm assuming you actually know what a thread is.&nbsp; 
@@ -51,11 +59,24 @@ suspends the currently executing process and invokes a scheduler to determine
 which process should execute next. Therefore, all processes will get some amount 
 of CPU time at any given time.&quot;<sup>15</sup></p>
 <h3>CPU Bound Threads vs. I/O Bound Threads</h3>
-<p>[todo]</p>
-<p>
-<a href="https://stackoverflow.com/questions/868568/what-do-the-terms-cpu-bound-and-i-o-bound-mean">
-https://stackoverflow.com/questions/868568/what-do-the-terms-cpu-bound-and-i-o-bound-mean</a>
-</p>
+<p>In broad terms, there are two kinds of threads, or tasks.&nbsp; CPU-bound 
+tasks (or threads) refers to code that is executed 100% on the local CPU <i>and</i> 
+that code doesn't wait for anything else.&nbsp; By &quot;anything else&quot;, we mean a 
+variety of things:</p>
+<ul>
+	<li>hardware interrupts (you usually don't have to deal with things at this 
+	level anymore)</li>
+	<li>completion of requests to remote servers (very common -- requesting data 
+	from a database and calling a web API are two examples)</li>
+	<li>waiting on another thread (fairly common)</li>
+	<li>waiting on an I/O completion event (usually refers to writing data as a 
+	stream to a hardware device or reading data in as a stream from a hardware 
+	device, such as the serial port stream class<sup>18</sup>.</li>
+</ul>
+<p>An I/O bound thread or task ins the opposite -- while it might do some 
+processing, it most likely spends most of its time waiting for something else to 
+signal that data is ready to be processed.&nbsp; The &quot;something else&quot; is the 
+list above.</p>
 <h3>Coming Up With a Good Thread Example</h3>
 <p>The first problem of course is coming up with a good example where the work 
 is capable of being broken up into isolated chunks and that takes a reasonable 
@@ -1697,20 +1718,34 @@ the consequence of the <code>ThreadPool</code>'s scheduler, which delays startin
 CPU-bound tasks when the number of tasks exceeds the number of cores.&nbsp; 
 There's a variety of write-ups on the behavior of the <code>ThreadPool</code>, particularly 
 that once tasks &gt; CPU cores, subsequent tasks are delayed by 500ms.&nbsp; 
-There's clearly a lot more going on than that!</p>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<h2>&nbsp;</h2>
+There's clearly a lot more delay going on than that!&nbsp; Diving into the 
+<code>ThreadPool</code> class is really going beyond the scope of this article -- the point 
+here is, if you use the <code>ThreadPool</code> class (and beware of all the various ways of 
+creating threads that tie in to the <code>ThreadPool</code> class) you need to be cognizant 
+of how many threads you're creating, what they're doing, and how long they do 
+it.</p>
 <h2>Conclusion</h2>
-<p>&nbsp;</p>
-<p>&nbsp;</p>
-<p>Writing Your Own Thread Pool</p>
-<p>Fibers: Write a Cooperative Multitasking (as opposed to a preemptive multitasking)</p>
-<p>ContinueWith</p>
-<p>Task.Start vs. Task.Run</p>
-<p>TaskCreationOptions.LongRunnning</p>
-<p>STA vs. MTA</p>
-<p>ThreadPool.QueueUserWorkItem / BackgroundWorker</p>
+<h3>Other Reading</h3>
+<p>
+<a href="https://channel9.msdn.com/Series/Three-Essential-Tips-for-Async/Tip-2-Distinguish-CPU-Bound-work-from-IO-bound-work">
+https://channel9.msdn.com/Series/Three-Essential-Tips-for-Async/Tip-2-Distinguish-CPU-Bound-work-from-IO-bound-work</a> </p>
+<p>
+<a href="https://stackoverflow.com/questions/5983779/catch-exception-that-is-thrown-in-different-thread#">https://stackoverflow.com/questions/5983779/catch-exception-that-is-thrown-in-different-thread#</a></p>
+<p>
+<a href="https://social.msdn.microsoft.com/Forums/vstudio/en-US/c95ba61b-78d3-462f-b09f-cd0571ffd22d/how-do-you-catch-exceptions-in-threaded-console-application?forum=csharpgeneral">
+https://social.msdn.microsoft.com/Forums/vstudio/en-US/c95ba61b-78d3-462f-b09f-cd0571ffd22d/how-do-you-catch-exceptions-in-threaded-console-application?forum=csharpgeneral</a></p>
+<p>
+Async void and exceptions:<a href="https://msdn.microsoft.com/en-us/magazine/jj991977.aspx"> 
+https://msdn.microsoft.com/en-us/magazine/jj991977.aspx</a></p>
+<p>LongRunning:
+<a href="http://blog.i3arnon.com/2015/07/02/task-run-long-running/">
+http://blog.i3arnon.com/2015/07/02/task-run-long-running/</a></p>
+<p>Working with the ThreadPool:
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/threading/the-managed-thread-pool">
+https://docs.microsoft.com/en-us/dotnet/standard/threading/the-managed-thread-pool</a> </p>
+<p>Task Completion: 
+<a href="https://stackoverflow.com/questions/16063520/how-do-you-create-an-asynchronous-method-in-c">https://stackoverflow.com/questions/16063520/how-do-you-create-an-asynchronous-method-in-c</a> </p>
+<h2>Footnotes</h2>
 <p><sup>1</sup> -&nbsp; the Intel CPU LOCK instruction supports ADD, ADC, AND, 
 BTC, BTR, BTS, CMPXCHG, CMPXCH8B, DEC, INC, NEG, NOT, OR, SBB, SUB, XOR, XADD, 
 and XCHG</p>
@@ -1756,27 +1791,9 @@ https://docs.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-manag
 <p><sup>17</sup> -
 <a href="https://docs.microsoft.com/en-us/dotnet/standard/parallel-programming/task-cancellation">
 https://docs.microsoft.com/en-us/dotnet/standard/parallel-programming/task-cancellation</a> </p>
-<p>Other Reading:</p>
-<p>
-<a href="https://channel9.msdn.com/Series/Three-Essential-Tips-for-Async/Tip-2-Distinguish-CPU-Bound-work-from-IO-bound-work">
-https://channel9.msdn.com/Series/Three-Essential-Tips-for-Async/Tip-2-Distinguish-CPU-Bound-work-from-IO-bound-work</a> </p>
-<p>
-<a href="https://stackoverflow.com/questions/5983779/catch-exception-that-is-thrown-in-different-thread#">https://stackoverflow.com/questions/5983779/catch-exception-that-is-thrown-in-different-thread#</a></p>
-<p>
-<a href="https://social.msdn.microsoft.com/Forums/vstudio/en-US/c95ba61b-78d3-462f-b09f-cd0571ffd22d/how-do-you-catch-exceptions-in-threaded-console-application?forum=csharpgeneral">
-https://social.msdn.microsoft.com/Forums/vstudio/en-US/c95ba61b-78d3-462f-b09f-cd0571ffd22d/how-do-you-catch-exceptions-in-threaded-console-application?forum=csharpgeneral</a></p>
-<p>
-Async void and exceptions:<a href="https://msdn.microsoft.com/en-us/magazine/jj991977.aspx"> 
-https://msdn.microsoft.com/en-us/magazine/jj991977.aspx</a></p>
-<p>LongRunning:
-<a href="http://blog.i3arnon.com/2015/07/02/task-run-long-running/">
-http://blog.i3arnon.com/2015/07/02/task-run-long-running/</a></p>
-<p>Working with the ThreadPool:
-<a href="https://docs.microsoft.com/en-us/dotnet/standard/threading/the-managed-thread-pool">
-https://docs.microsoft.com/en-us/dotnet/standard/threading/the-managed-thread-pool</a> </p>
-<p>Task Completion: 
-<a href="https://stackoverflow.com/questions/16063520/how-do-you-create-an-asynchronous-method-in-c">https://stackoverflow.com/questions/16063520/how-do-you-create-an-asynchronous-method-in-c</a> </p>
-<p>&nbsp;</p>
+<p><sup>18</sup> -
+<a href="http://www.sparxeng.com/blog/software/must-use-net-system-io-ports-serialport">
+http://www.sparxeng.com/blog/software/must-use-net-system-io-ports-serialport</a> </p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>

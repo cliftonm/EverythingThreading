@@ -54,49 +54,51 @@ namespace Primes
                 Console.WriteLine("AppDomain: " + (exargs.ExceptionObject as Exception)?.Message);
             };
 
-            // DurationOf(BruteForce, "Brute force:");
+            // Comment out what you don't want:
+
+            DurationOf(BruteForce, "Brute force:");
             Console.WriteLine();
 
-            // DurationOf(ThreadedBruteForce, "Threaded brute force:");
+            DurationOf(ThreadedBruteForce, "Threaded brute force:");
             Console.WriteLine();
 
-            // DurationOf(ThreadedGetNextWorkItemBruteForce, "Threaded get next work item brute force:");
+            DurationOf(ThreadedGetNextWorkItemBruteForce, "Threaded get next work item brute force:");
             Console.WriteLine();
 
-            // DurationOf(AsParallelGetNextWorkItemBruteForce, "AsPrallel get next work item brute force:");
+            DurationOf(AsParallelGetNextWorkItemBruteForce, "AsPrallel get next work item brute force:");
             Console.WriteLine();
 
-            // DurationOf(TaskRunGetNextWorkItemBruteForce, "Task.Run get next work item brute force:");
+            DurationOf(TaskRunGetNextWorkItemBruteForce, "Task.Run get next work item brute force:");
             Console.WriteLine();
 
-            // DurationOf(TaskAwaitGetNextWorkItemBruteForce, "await Task.Run get next work item brute force:");
+            DurationOf(TaskAwaitGetNextWorkItemBruteForce, "await Task.Run get next work item brute force:");
             Console.WriteLine();
 
-            // DurationOf(TaskAwaitGetNextWorkItemBruteForceWithReturn, "await Task.Run get next work item with return brute force:");
+            DurationOf(TaskAwaitGetNextWorkItemBruteForceWithReturn, "await Task.Run get next work item with return brute force:");
             Console.WriteLine();
 
-            // DurationOf(TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation, "await Task.Run get next work item with return brute force and continuation:");
+            DurationOf(TaskAwaitGetNextWorkItemBruteForceWithReturnAndContinuation, "await Task.Run get next work item with return brute force and continuation:");
             Console.WriteLine();
 
             // DurationOf(ThreadedGetNextWorkItemSieve, "Threaded get next work item sieve:");
-            Console.WriteLine();
+            // Console.WriteLine();
 
             // DurationOf(ThreadedGetNextWorkItemSieveShowPrimes, "Threaded get next work item sieve:");
             // notPrimes.Select((p, idx) => new { p, idx }).Where((item) => !item.p).ToList().ForEach(item => Console.WriteLine(item.idx));
-            Console.WriteLine();
+            // Console.WriteLine();
 
-            // UsingSemaphores();
+            UsingSemaphores();
 
-            // ThreadExceptionExample();
-            // TaskAwaitGetNextWorkItemBruteForceThrowsException();
+            ThreadExceptionExample();
+            TaskAwaitGetNextWorkItemBruteForceThrowsException();
 
-            // DurationOf(HybridAwaitableThread, "Hybrid awaitable thread:");
+            DurationOf(HybridAwaitableThread, "Hybrid awaitable thread:");
 
             // await AsyncVoidExceptionTest();
 
-            // DurationOf(CancelThreads, "Cancelling threads after 1 second.");
-            // DurationOf(CancelTasks, "Cancelling tasks after 1 second.");
-            // CancellableSemaphores();
+            DurationOf(CancelThreads, "Cancelling threads after 1 second.");
+            DurationOf(CancelTasks, "Cancelling tasks after 1 second.");
+            CancellableSemaphores();
 
             TaskStartTime();
 
